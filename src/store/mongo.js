@@ -2,6 +2,7 @@
 //   npm install mongodb
 // The driver is imported lazily so the default (in-memory) setup has zero dependencies.
 import { ConflictError } from '../errors.js';
+import { runMigrations } from './migrations.js';
 import { encodeCursor } from './pagination.js';
 
 const toDoc = ({ id, ...rest }) => ({ _id: id, ...rest });
@@ -72,27 +73,9 @@ export class MongoStore {
     this._db = db;
     const c = (n) => db.collection(n);
 
-    await Promise.all([
-      c('api_keys').createIndex({ role: 1, ownerId: 1 }),
-      c('operators').createIndex({ status: 1 }),
-      c('operators').createIndex({ contactEmail: 1 }),
-      c('agents').createIndex({ publicKey: 1 }, { unique: true }),
-      c('agents').createIndex({ keyThumbprint: 1 }, { unique: true }),
-      c('agents').createIndex({ operatorId: 1, createdAt: -1 }),
-      c('grants').createIndex({ agentId: 1, businessId: 1, status: 1, createdAt: 1 }),
-      c('grants').createIndex({ businessId: 1, createdAt: -1 }),
-      c('grants').createIndex({ operatorId: 1, createdAt: -1 }),
-      c('credentials').createIndex({ agentId: 1, issuedAt: -1 }),
-      c('credentials').createIndex({ businessId: 1, issuedAt: -1 }),
-      c('credentials').createIndex({ grantId: 1 }),
-      c('nonces').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
-      c('verification_events').createIndex({ businessId: 1, evaluatedAt: -1 }),
-      c('verification_events').createIndex({ agentId: 1, evaluatedAt: -1 }),
-      c('audit_events').createIndex({ seq: 1 }, { unique: true }),
-      c('audit_events').createIndex({ occurredAt: -1, _id: -1 }),
-      c('audit_events').createIndex({ subjectId: 1, occurredAt: -1 }),
-      c('audit_events').createIndex({ type: 1, occurredAt: -1 }),
-    ]);
+    // Schema (indexes, unique constraints) is owned by versioned migrations;
+    // pending ones are applied on startup so the API never runs without them.
+    this.migrations = await runMigrations(db);
 
     const apiKeys = repo(c('api_keys'));
     this.apiKeys = {
