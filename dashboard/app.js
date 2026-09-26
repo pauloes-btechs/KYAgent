@@ -6,6 +6,8 @@
 //  * Deny by default: actions are shown only for roles the RBAC matrix allows, and
 //    any error hides data rather than guessing.
 
+import { denyCountsByReason, trustAssessment } from '/dashboard/trust.js';
+
 const IDLE_MS = 30 * 60 * 1000;
 const state = { key: null, role: null, keyPrefix: null, idleTimer: null };
 const $ = (id) => document.getElementById(id);
@@ -190,7 +192,7 @@ function actionButton(label, onClick, cls = 'secondary') {
  * Generic list page over a paginated endpoint.
  * columns: [{ label, cell(row) -> Node|string }]
  */
-function listView(main, { path, columns, filters = [], rowActions, onRow, emptyText = 'Nothing here yet.' }) {
+function listView(main, { path, columns, filters = [], rowActions, onRow, onLoaded, emptyText = 'Nothing here yet.' }) {
   const params = new URLSearchParams();
   const tableWrap = el('div');
   const detail = el('div');
@@ -225,7 +227,7 @@ function listView(main, { path, columns, filters = [], rowActions, onRow, emptyT
     if (cursor) qs.set('cursor', cursor);
     let page;
     try {
-      page = await api('GET', `${path}?${qs}`);
+      page = await api('GET', `${path}${path.includes('?') ? '&' : '?'}${qs}`);
     } catch (err) {
       tableWrap.replaceChildren(el('div', { class: 'empty', role: 'alert', text: `Could not load: ${err.message}` }));
       return;
@@ -233,6 +235,7 @@ function listView(main, { path, columns, filters = [], rowActions, onRow, emptyT
     rows = rows.concat(page.data);
     cursor = page.nextCursor;
     draw();
+    if (onLoaded) onLoaded(rows);
   }
 
   function draw() {
@@ -251,7 +254,19 @@ function listView(main, { path, columns, filters = [], rowActions, onRow, emptyT
         rows.map((r) =>
           el(
             'tr',
-            { class: onRow ? 'clickable' : '', tabindex: onRow ? 0 : undefined, onclick: onRow ? () => onRow(r, detail) : undefined },
+            {
+              class: onRow ? 'clickable' : '',
+              tabindex: onRow ? 0 : undefined,
+              onclick: onRow ? () => onRow(r, detail) : undefined,
+              onkeydown: onRow
+                ? (e) => {
+                    if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                      e.preventDefault();
+                      onRow(r, detail);
+                    }
+                  }
+                : undefined,
+            },
             cols.map((c) => el('td', {}, c.cell(r))),
           ),
         ),
@@ -266,6 +281,105 @@ function listView(main, { path, columns, filters = [], rowActions, onRow, emptyT
 
 function factSheet(title, pairs) {
   return el('section', { class: 'panel' }, el('h2', { text: title }), el('dl', {}, pairs.map(([k, v]) => [el('dt', { text: k }), el('dd', {}, v ?? '—')])));
+}
+
+// Operator records per view (agents inherit risk from their operator). Errors are cached as null => untrusted.
+function operatorCache() {
+  const cache = new Map();
+  return (id) => {
+    if (!cache.has(id)) cache.set(id, api('GET', `/v1/operators/${encodeURIComponent(id)}`).catch(() => null));
+    return cache.get(id);
+  };
+}
+
+function trustBadge(t) {
+  return el('span', { class: `trust ${t.level}`, title: t.verdict }, el('strong', { text: String(t.score) }), ` ${t.level}`);
+}
+
+function trustCell(agent, getOperator) {
+  const cell = el('span', { class: 'muted', text: '…', 'aria-busy': 'true' });
+  getOperator(agent.operatorId).then((operator) => {
+    cell.removeAttribute('aria-busy');
+    cell.className = '';
+    cell.replaceChildren(trustBadge(trustAssessment({ agent, operator })));
+  });
+  return cell;
+}
+
+function trustPanel(t) {
+  return el(
+    'section',
+    { class: 'panel', 'aria-labelledby': 'trust-h' },
+    el('h2', { id: 'trust-h', text: 'Trust score' }),
+    el('p', {}, trustBadge(t), ' ', el('span', { class: t.level === 'untrusted' ? 'stamp DENY' : t.level === 'high' ? 'stamp ALLOW' : 'stamp WARN', text: t.verdict })),
+    el(
+      'table',
+      {},
+      el('caption', { class: 'muted', text: 'Informational, derived from agent/operator status and the audit log. The authoritative decision is POST /v1/verify.' }),
+      el('thead', {}, el('tr', {}, ['Factor', 'Impact', 'Detail'].map((h) => el('th', { scope: 'col', text: h })))),
+      el('tbody', {}, t.factors.map((f) => el('tr', {}, el('td', { text: f.label }), el('td', { class: 'mono', text: f.impact === 0 ? '0' : String(f.impact) }), el('td', { text: f.detail })))),
+    ),
+  );
+}
+
+async function agentDetail(agent, detail, getOperator) {
+  detail.replaceChildren(el('div', { class: 'loading', role: 'status', text: 'Loading agent…' }));
+  let operator;
+  let verifications = null;
+  try {
+    const fresh = await api('GET', `/v1/agents/${encodeURIComponent(agent.id)}`);
+    agent = fresh;
+    operator = await getOperator(agent.operatorId);
+    if (state.role === 'admin') {
+      verifications = (await api('GET', `/v1/verifications?agentId=${encodeURIComponent(agent.id)}&limit=100`)).data;
+    }
+  } catch (err) {
+    detail.replaceChildren(el('div', { class: 'empty', role: 'alert', text: `Could not load agent: ${err.message}` }));
+    return;
+  }
+  const t = trustAssessment({ agent, operator, verifications });
+  const grants = el('div');
+  const creds = el('div');
+  detail.replaceChildren(
+    factSheet(`Agent ${agent.name}`, [
+      ['Agent', mono(agent.id)],
+      ['Status', status(agent.status)],
+      ['Status reason', agent.statusReason],
+      ['Operator', operator ? el('span', {}, `${operator.legalName} `, mono(operator.id), ' ', status(operator.status)) : mono(agent.operatorId)],
+      ['Public key', mono(agent.publicKey)],
+      ['Key thumbprint', mono(agent.keyThumbprint)],
+      ['Created', fmtTime(agent.createdAt)],
+      ['Revoked', fmtTime(agent.revokedAt)],
+    ]),
+    trustPanel(t),
+    el('h2', { class: 'section', text: 'Grants to this agent' }),
+    grants,
+    el('h2', { class: 'section', text: 'Credentials' }),
+    creds,
+  );
+  listView(grants, {
+    path: `/v1/grants?agentId=${encodeURIComponent(agent.id)}`,
+    emptyText: 'No grants for this agent.',
+    columns: [
+      { label: 'ID', cell: (g) => mono(g.id) },
+      { label: 'Business', cell: (g) => mono(g.businessId) },
+      { label: 'Actions', cell: (g) => mono(g.actions.join(', ')) },
+      { label: 'Status', cell: (g) => status(g.status) },
+      { label: 'Expires', cell: (g) => fmtTime(g.expiresAt) },
+    ],
+  });
+  listView(creds, {
+    path: `/v1/credentials?agentId=${encodeURIComponent(agent.id)}`,
+    emptyText: 'No credentials issued to this agent.',
+    columns: [
+      { label: 'ID (jti)', cell: (c) => mono(c.id) },
+      { label: 'Audience', cell: (c) => mono(c.businessId) },
+      { label: 'Status', cell: (c) => status(c.status) },
+      { label: 'Expires', cell: (c) => fmtTime(c.expiresAt) },
+    ],
+  });
+  detail.querySelector('h2')?.setAttribute('tabindex', '-1');
+  detail.querySelector('h2')?.focus();
 }
 
 // ------------------------------------------------------------------ views
@@ -302,8 +416,10 @@ function operatorsView(main) {
 }
 
 function agentsView(main) {
-  header(main, 'Agents', 'Registered agents and their Ed25519 key thumbprints. Revocation takes effect on the next verification.');
+  header(main, 'Agents', 'Registered agents, their Ed25519 key thumbprints and trust scores. Select a row for details. Revocation takes effect on the next verification.');
+  const getOperator = operatorCache();
   listView(main, {
+    onRow: (a, detail) => agentDetail(a, detail, getOperator),
     path: '/v1/agents',
     filters: [
       { name: 'status', label: 'Status', options: ['active', 'suspended', 'revoked'] },
@@ -314,6 +430,7 @@ function agentsView(main) {
       { label: 'ID', cell: (a) => mono(a.id) },
       { label: 'Operator', cell: (a) => mono(a.operatorId) },
       { label: 'Status', cell: (a) => status(a.status) },
+      { label: 'Trust', cell: (a) => trustCell(a, getOperator) },
       { label: 'Key thumbprint', cell: (a) => mono(a.keyThumbprint) },
       { label: 'Created', cell: (a) => fmtTime(a.createdAt) },
     ],
@@ -355,9 +472,10 @@ function lookupView(main) {
     try {
       const agent = await api('GET', `/v1/agents/${encodeURIComponent(input.value.trim())}`);
       const op = await api('GET', `/v1/operators/${encodeURIComponent(agent.operatorId)}`);
-      const trusted = agent.status === 'active' && op.status === 'verified';
+      const history = await api('GET', `/v1/verifications?agentId=${encodeURIComponent(agent.id)}&limit=100`).then((p) => p.data, () => null);
+      const t = trustAssessment({ agent, operator: op, verifications: history });
       out.replaceChildren(
-        el('p', { class: trusted ? 'stamp ALLOW' : 'stamp DENY', text: trusted ? 'Identity verified — agent active, operator verified' : `Not trusted — agent ${agent.status}, operator ${op.status}` }),
+        trustPanel(t),
         factSheet('Identity', [
           ['Agent', mono(agent.id)],
           ['Name', agent.name],
@@ -439,7 +557,23 @@ function credentialsView(main) {
 
 function verificationsView(main) {
   header(main, 'Verifications', 'Audit log of every ALLOW / DENY decision, newest first. Each DENY carries the first failed check.');
+  const summary = el('div');
+  main.append(summary);
   listView(main, {
+    onLoaded: (rows) => {
+      const counts = denyCountsByReason(rows);
+      summary.replaceChildren(
+        counts.length
+          ? el(
+              'table',
+              { class: 'summary' },
+              el('caption', { class: 'muted', text: `DENY count by reason (${rows.length} loaded decisions)` }),
+              el('thead', {}, el('tr', {}, el('th', { scope: 'col', text: 'Reason code' }), el('th', { scope: 'col', text: 'DENY count' }))),
+              el('tbody', {}, counts.map((c) => el('tr', {}, el('td', {}, mono(c.code)), el('td', { class: 'mono', text: String(c.count) })))),
+            )
+          : '',
+      );
+    },
     path: '/v1/verifications',
     filters: [
       { name: 'decision', label: 'Decision', options: ['ALLOW', 'DENY'] },
