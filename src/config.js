@@ -144,15 +144,22 @@ export function loadConfig(env = process.env) {
     warnings.push('MONGODB_URI not set: using the in-memory store; data is not persisted');
   }
 
-  // --- modes
-  let sanctionsMode = env.SANCTIONS_MODE || 'mock';
-  if (sanctionsMode !== 'mock' && sanctionsMode !== 'off') {
-    warnings.push('SANCTIONS_MODE has an unsupported value: treating it as "mock"');
-    sanctionsMode = 'mock';
+  // --- data-source modes (mongo-collections.md §0): live|fixture, default fixture. Fixture
+  // changes only where data comes from, never the store; every mode works offline by default.
+  const modes = {};
+  for (const [key, name] of [['sanctions', 'SANCTIONS_MODE'], ['chain', 'CHAIN_MODE'], ['llm', 'LLM_MODE'], ['embeddings', 'EMBEDDINGS_MODE']]) {
+    const raw = env[name];
+    // `mock` / `off` are the legacy operator-onboarding values of SANCTIONS_MODE (data-schema.md).
+    const legacy = name === 'SANCTIONS_MODE' && (raw === 'mock' || raw === 'off');
+    if (raw !== undefined && raw !== '' && raw !== 'live' && raw !== 'fixture' && !legacy) {
+      throw new ConfigError(`${name} must be live or fixture`);
+    }
+    modes[key] = raw === 'live' ? 'live' : 'fixture';
   }
+  // Operator-onboarding name screen (kyc.js): `off` skips it; anything else screens (fail safe).
+  const sanctionsMode = env.SANCTIONS_MODE === 'off' ? 'off' : 'mock';
+  if (env.SANCTIONS_MODE === 'off') warnings.push('SANCTIONS_MODE=off: operator onboarding name screening is skipped');
   if (!rateLimit.enabled) warnings.push('KYA_RATE_LIMIT_ENABLED=false: public verification and registration endpoints are not rate limited');
-  if (env.CHAIN_MODE) warnings.push('CHAIN_MODE is set but ignored (blockchain registry is a non-goal)');
-  if (env.LLM_MODE) warnings.push('LLM_MODE is set but ignored (no LLM features in MVP)');
 
   const config = {
     nodeEnv,
@@ -169,6 +176,7 @@ export function loadConfig(env = process.env) {
     maxBodyBytes,
     rateLimit,
     sanctionsMode,
+    modes,
     sources: { signingKey: signingKeySource, pepper: pepperSource, bootstrapAdmin: bootstrap.source },
     warnings,
   };
