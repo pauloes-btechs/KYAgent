@@ -7,7 +7,7 @@ import { ensureValid, invalidState, notFound, pageQuery } from './util.js';
 
 const MAX_GRANT_LIFETIME_MS = 365 * 24 * 3600 * 1000;
 
-export function grantService({ store, clock }) {
+export function grantService({ store, clock, audit }) {
   function visibleTo(principal, grant) {
     if (principal.role === 'admin') return true;
     if (principal.role === 'business') return grant.businessId === principal.businessId;
@@ -40,6 +40,20 @@ export function grantService({ store, clock }) {
         statusReason: null,
       };
       await store.grants.insert(doc);
+      await audit.recordOrCompensate(
+        principal,
+        'grant.created',
+        { type: 'grant', id: doc.id },
+        {
+          businessId: doc.businessId,
+          agentId: doc.agentId,
+          operatorId: doc.operatorId,
+          actions: doc.actions,
+          constraints: doc.constraints,
+          expiresAt: doc.expiresAt,
+        },
+        () => store.grants.revoke(doc.id, { revokedAt: clock.now(), statusReason: 'audit log unavailable' }),
+      );
       return grantOut(doc);
     },
 
@@ -62,6 +76,11 @@ export function grantService({ store, clock }) {
       if (!grant || !visibleTo(principal, grant)) throw notFound();
       const updated = await store.grants.revoke(id, { revokedAt: clock.now(), statusReason: body.reason });
       if (!updated) throw invalidState('Grant is already revoked');
+      await audit.record(principal, 'grant.revoked', { type: 'grant', id }, {
+        businessId: updated.businessId,
+        agentId: updated.agentId,
+        reason: body.reason,
+      });
       return grantOut(updated);
     },
   };
