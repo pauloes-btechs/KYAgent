@@ -7,11 +7,15 @@ import { verifyCredentialJws } from '../crypto/credentials.js';
 import { parsePublicKey, sha256hex, verifySignature } from '../crypto/ed25519.js';
 import { newId } from '../ids.js';
 import { schemas, validate } from '../validate.js';
-import { anyActionMatches, actionMatches, constraintsSatisfied } from './authz.js';
+import { invariant } from '../harness/invariants.js';
+import { anyActionMatches, actionMatches } from './authz.js';
 import { eventOut, pageOut } from './serialize.js';
 import { pageQuery } from './util.js';
 
 const MAX_CONTEXT_BYTES = 8 * 1024;
+// Steps 9i/10c: grant constraints are the immutable INV_DELEGATION_MAX (harness.md §1).
+const withinDelegationMax = (constraints, resource, context) =>
+  invariant('INV_DELEGATION_MAX').check({ constraints, resource, context });
 
 class Deny {
   constructor(code) {
@@ -110,8 +114,8 @@ export function verificationService({ store, clock, config, audit }) {
       }
       // 9i. constraints (grant is authoritative; credential copy must also hold)
       if (
-        !constraintsSatisfied(grant.constraints, req.resource, req.context) ||
-        !constraintsSatisfied(claims.kya_constraints, req.resource, req.context)
+        !withinDelegationMax(grant.constraints, req.resource, req.context) ||
+        !withinDelegationMax(claims.kya_constraints, req.resource, req.context)
       ) {
         deny('CONSTRAINT_VIOLATION');
       }
@@ -123,7 +127,7 @@ export function verificationService({ store, clock, config, audit }) {
     if (!grants.length) deny('NO_GRANT');
     const matching = grants.filter((g) => g.actions.some((p) => actionMatches(p, req.action)));
     if (!matching.length) deny('ACTION_NOT_PERMITTED');
-    const winner = matching.find((g) => constraintsSatisfied(g.constraints, req.resource, req.context));
+    const winner = matching.find((g) => withinDelegationMax(g.constraints, req.resource, req.context));
     if (!winner) deny('CONSTRAINT_VIOLATION');
     out.grantId = winner.id;
   }
