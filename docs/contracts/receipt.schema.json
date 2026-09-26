@@ -1,0 +1,261 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kyagent.dev/contracts/receipt.schema.json",
+  "title": "KYAgent compliance receipt (kya-receipt-v1)",
+  "description": "One receipt per investigation (receipts collection, _id = receiptId; embedded copy in investigations.receipt). receiptHash = sha256hex(canonicalJson(receipt without 'receiptHash' and 'anchor')). canonicalJson is integer-only (crypto-and-signing.md §3.1), therefore every number in the hashed body is an integer and similarity scores are encoded as parts-per-million (*Ppm). The hash is notarised by an audit_events entry of type 'receipt.issued' whose data.receiptHash equals receiptHash; 'anchor' records that entry. Timestamps are ISO 8601 UTC strings. Never contains secrets, signatures, credentials JWS, nonces or contact emails.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "receiptVersion", "receiptId", "investigationId", "trigger", "issuedAt", "traceId",
+    "decision", "riskDecision", "reasons", "agent", "principal", "businessId", "delegation",
+    "transaction", "identity", "sanctions", "signals", "memory", "stages",
+    "sanctionsDatasetVersion", "policyVersion", "invariantsHash", "harnessVersion", "delegationVersion",
+    "passport", "evidence", "receiptHash"
+  ],
+  "properties": {
+    "receiptVersion": { "const": "kya-receipt-v1" },
+    "receiptId": { "type": "string", "pattern": "^rcp_[A-Za-z0-9_-]{1,64}$" },
+    "investigationId": { "type": "string", "pattern": "^inv_[A-Za-z0-9_-]{1,64}$" },
+    "trigger": { "enum": ["api", "sanctions_change", "manual"] },
+    "issuedAt": { "type": "string", "format": "date-time" },
+    "traceId": { "type": ["string", "null"], "maxLength": 128, "description": "requestId of the HTTP request, or the change event id for watcher runs" },
+    "decision": { "enum": ["ALLOW", "DENY"], "description": "Identity-layer verdict, same vocabulary as /v1/verify" },
+    "riskDecision": { "enum": ["ALLOW", "REVIEW", "BLOCK"] },
+    "reasons": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "riskDecision", "stage"],
+        "properties": {
+          "code": {
+            "enum": ["CLEAR", "IDENTITY_DENIED", "DELEGATION_DENIED", "DELEGATION_MAX_EXCEEDED", "DAILY_LIMIT_EXCEEDED",
+                     "WALLET_NOT_APPROVED", "ASSET_NOT_PERMITTED", "SANCTIONS_EXACT_MATCH", "SANCTIONS_FUZZY_MATCH",
+                     "PASSPORT_SUSPENDED", "PASSPORT_REVOKED", "PASSPORT_UNDER_REVIEW", "PASSPORT_RE_SCREENING",
+                     "MEMORY_PRECEDENT_TAKEOVER", "BEHAVIOR_ESCALATION", "HARNESS_INVARIANTS_MISMATCH", "INTERNAL_ERROR"]
+          },
+          "riskDecision": { "enum": ["ALLOW", "REVIEW", "BLOCK"] },
+          "stage": { "type": "string", "pattern": "^[a-z0-9_]{1,64}$" },
+          "invariantId": {
+            "enum": ["INV_SANCTIONS_EXACT_BLOCK", "INV_DELEGATION_MAX", "INV_DAILY_LIMIT", "INV_NO_SELF_APPROVAL",
+                     "INV_NO_SELF_PASSPORT_MODIFICATION", "INV_UNVERIFIED_MEMORY_NOT_PRECEDENT"]
+          },
+          "identityReasonCode": { "type": "string", "pattern": "^[A-Z_]+$" },
+          "evidenceRefs": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "keyThumbprint", "wallet"],
+      "properties": {
+        "id": { "type": "string" },
+        "keyThumbprint": { "type": ["string", "null"] },
+        "wallet": { "$ref": "#/$defs/addressOrNull" }
+      }
+    },
+    "principal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status"],
+      "properties": {
+        "id": { "type": ["string", "null"], "description": "= operatorId" },
+        "status": { "type": ["string", "null"] }
+      }
+    },
+    "businessId": { "type": ["string", "null"] },
+    "delegation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "checked"],
+      "properties": {
+        "id": { "type": ["string", "null"], "description": "= grantId" },
+        "version": { "type": ["integer", "null"], "minimum": 1 },
+        "checked": { "type": "boolean", "description": "false when the stage was skipped (identity short-circuit)" },
+        "asset": { "type": ["string", "null"] },
+        "maxTxAmount": { "type": ["integer", "null"], "minimum": 0 },
+        "dailyLimit": { "type": ["integer", "null"], "minimum": 0 },
+        "spent24h": { "type": ["integer", "null"], "minimum": 0 },
+        "withinMax": { "type": ["boolean", "null"] },
+        "withinDaily": { "type": ["boolean", "null"] },
+        "walletApproved": { "type": ["boolean", "null"] },
+        "assetPermitted": { "type": ["boolean", "null"] }
+      }
+    },
+    "transaction": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["asset", "amount", "wallet", "counterparty"],
+          "properties": {
+            "asset": { "const": "USDC" },
+            "amount": { "type": ["integer", "null"], "minimum": 1, "description": "minor units (6 decimals); null for sanctions_change re-screens" },
+            "wallet": { "$ref": "#/$defs/address" },
+            "counterparty": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["address", "name"],
+              "properties": {
+                "address": { "$ref": "#/$defs/address" },
+                "name": { "type": ["string", "null"] }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "decision", "reasonCode"],
+      "properties": {
+        "mode": { "enum": ["signed", "state"] },
+        "decision": { "enum": ["ALLOW", "DENY"] },
+        "reasonCode": { "type": "string", "pattern": "^[A-Z_]+$", "description": "REASON_CODES value" },
+        "verifiedSignature": { "type": "boolean" }
+      }
+    },
+    "sanctions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checked", "datasetVersion", "exactHits", "fuzzyHits"],
+      "properties": {
+        "checked": { "type": "boolean" },
+        "datasetVersion": { "type": ["string", "null"] },
+        "exactHits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["sanctionsId", "address", "name"],
+            "properties": {
+              "sanctionsId": { "type": "string" },
+              "address": { "$ref": "#/$defs/address" },
+              "name": { "type": "string" },
+              "programs": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "fuzzyHits": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["sanctionsId", "name", "matched", "scorePpm"],
+            "properties": {
+              "sanctionsId": { "type": "string" },
+              "name": { "type": "string" },
+              "matched": { "type": "string", "description": "name or alias that matched" },
+              "scorePpm": { "type": "integer", "minimum": 0, "description": "$meta searchScore x 1e6, rounded" }
+            }
+          }
+        }
+      }
+    },
+    "signals": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/signal" }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checked", "engine", "embeddingModel", "k", "minScorePpm", "hits"],
+      "properties": {
+        "checked": { "type": "boolean" },
+        "engine": { "const": "$vectorSearch" },
+        "embeddingModel": { "type": ["string", "null"] },
+        "k": { "type": "integer", "minimum": 0 },
+        "minScorePpm": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "hits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["memoryId", "status", "outcome", "scorePpm"],
+            "properties": {
+              "memoryId": { "type": "string" },
+              "status": { "const": "VERIFIED", "description": "INV_UNVERIFIED_MEMORY_NOT_PRECEDENT: no other status can appear" },
+              "outcome": { "enum": ["CLEAN", "CONFIRMED_ACCOUNT_TAKEOVER", "FALSE_POSITIVE", "SANCTIONS_MATCH"] },
+              "scorePpm": { "type": "integer", "minimum": 0, "maximum": 1000000, "description": "$meta vectorSearchScore x 1e6, rounded" },
+              "usedAsPrecedent": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "engine", "status", "durationMs"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9_]{1,64}$" },
+          "engine": { "enum": ["code", "find", "aggregate", "$search", "$vectorSearch", "find+$search", "find+code", "find+aggregate"] },
+          "status": { "enum": ["passed", "failed", "flagged", "skipped", "error"] },
+          "durationMs": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "sanctionsDatasetVersion": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "policyVersion": { "type": "string", "pattern": "^[a-z0-9-]+\\+inv:[0-9a-f]{64}$", "description": "TRUST_RULES_VERSION + '+inv:' + INVARIANTS_HASH" },
+    "invariantsHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "harnessVersion": { "type": "integer", "minimum": 1 },
+    "delegationVersion": { "type": ["integer", "null"], "minimum": 1 },
+    "passport": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "before", "after"],
+          "properties": {
+            "id": { "type": "string" },
+            "before": { "$ref": "#/$defs/passportStatus" },
+            "after": { "$ref": "#/$defs/passportStatus" }
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "source", "ref", "summary"],
+        "properties": {
+          "id": { "type": "string", "maxLength": 200 },
+          "kind": { "enum": ["identity", "delegation", "sanctions_exact", "sanctions_fuzzy", "signal", "memory", "invariant", "policy", "passport", "step"] },
+          "source": { "type": "string", "maxLength": 100 },
+          "ref": { "type": ["string", "null"], "maxLength": 200 },
+          "summary": { "type": "string", "maxLength": 500 }
+        }
+      }
+    },
+    "receiptHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["auditEventId", "auditSeq", "auditHash"],
+      "description": "Excluded from receiptHash. The receipt.issued audit event that notarises receiptHash.",
+      "properties": {
+        "auditEventId": { "type": "string" },
+        "auditSeq": { "type": "integer", "minimum": 1 },
+        "auditHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  },
+  "$defs": {
+    "address": { "type": "string", "pattern": "^0x[0-9a-f]{40}$" },
+    "addressOrNull": { "type": ["string", "null"], "pattern": "^0x[0-9a-f]{40}$" },
+    "signal": { "enum": ["NEW_WALLET", "NEW_COUNTERPARTY", "SIGNING_KEY_CHANGED", "AMOUNT_ANOMALY", "VELOCITY", "NEAR_CEILING"] },
+    "passportStatus": { "enum": ["ACTIVE", "REVIEW", "RE_SCREENING", "SUSPENDED", "REVOKED"] }
+  }
+}
