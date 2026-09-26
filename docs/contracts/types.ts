@@ -493,3 +493,426 @@ export interface HealthResponse {
   status: 'ok';
   store: 'memory' | 'mongo';
 }
+
+// ===========================================================================
+// Investigation harness (T01 contract freeze — ARCHITECTURE.md §9)
+// Additive only: nothing above this line changes. `Decision`, `REASON_CODES`
+// and `VerifyResponse` keep describing /v1/verify byte-for-byte.
+// Companions: mongo-collections.md, investigation-pipeline.md, harness.md,
+// decision-vocabulary.md, passport.md, receipt.schema.json, search-indexes.json.
+// ===========================================================================
+
+/** Id prefixes of harness documents (runtime ids: prefix + "_" + ULID; seeds use fixed ids). */
+export const INVESTIGATION_ID_PREFIXES = {
+  investigation: 'inv',
+  receipt: 'rcp',
+  passport: 'pp',
+  memory: 'mem',
+  transaction: 'txn',
+  sanctionsEntity: 'sdn',
+  sanctionsUpdate: 'upd',
+  harnessEvent: 'hev',
+} as const;
+
+export type PrincipalId = OperatorId; // principal := operator (alias, no rename)
+export type DelegationId = GrantId; // delegation := grant (alias, no rename)
+export type InvestigationId = string; // inv_...
+export type ReceiptId = string; // rcp_...
+export type PassportId = string; // pp_...
+export type MemoryId = string; // mem_...
+/** Lowercased EVM address, ^0x[0-9a-f]{40}$. */
+export type EvmAddress = string;
+
+// ---------------------------------------------------------------------------
+// Risk decision vocabulary (decision-vocabulary.md)
+// ---------------------------------------------------------------------------
+
+export const RISK_DECISIONS = ['ALLOW', 'REVIEW', 'BLOCK'] as const;
+export type RiskDecision = (typeof RISK_DECISIONS)[number];
+
+export const RISK_REASON_CODES = [
+  'CLEAR',
+  'IDENTITY_DENIED',
+  'DELEGATION_DENIED',
+  'DELEGATION_MAX_EXCEEDED',
+  'DAILY_LIMIT_EXCEEDED',
+  'WALLET_NOT_APPROVED',
+  'ASSET_NOT_PERMITTED',
+  'SANCTIONS_EXACT_MATCH',
+  'SANCTIONS_FUZZY_MATCH',
+  'PASSPORT_SUSPENDED',
+  'PASSPORT_REVOKED',
+  'PASSPORT_UNDER_REVIEW',
+  'PASSPORT_RE_SCREENING',
+  'MEMORY_PRECEDENT_TAKEOVER',
+  'BEHAVIOR_ESCALATION',
+  'HARNESS_INVARIANTS_MISMATCH',
+  'INTERNAL_ERROR',
+] as const;
+export type RiskReasonCode = (typeof RISK_REASON_CODES)[number];
+
+export const INVARIANT_IDS = [
+  'INV_SANCTIONS_EXACT_BLOCK',
+  'INV_DELEGATION_MAX',
+  'INV_DAILY_LIMIT',
+  'INV_NO_SELF_APPROVAL',
+  'INV_NO_SELF_PASSPORT_MODIFICATION',
+  'INV_UNVERIFIED_MEMORY_NOT_PRECEDENT',
+] as const;
+export type InvariantId = (typeof INVARIANT_IDS)[number];
+
+export const PIPELINE_STAGES = ['identity', 'delegation', 'sanctions', 'signals', 'memory', 'policy', 'decision'] as const;
+export type PipelineStageName = (typeof PIPELINE_STAGES)[number];
+/** Closed registry of adaptive steps (harness.md §3.3). */
+export const ADAPTIVE_STEPS = ['signing_key_history_check'] as const;
+export type AdaptiveStepId = (typeof ADAPTIVE_STEPS)[number];
+
+export const SIGNALS = ['NEW_WALLET', 'NEW_COUNTERPARTY', 'SIGNING_KEY_CHANGED', 'AMOUNT_ANOMALY', 'VELOCITY', 'NEAR_CEILING'] as const;
+export type Signal = (typeof SIGNALS)[number];
+
+export const OUTCOMES = ['CLEAN', 'CONFIRMED_ACCOUNT_TAKEOVER', 'FALSE_POSITIVE', 'SANCTIONS_MATCH'] as const;
+export type Outcome = (typeof OUTCOMES)[number];
+
+export interface RiskReason {
+  code: RiskReasonCode;
+  /** Verdict this reason alone implies. */
+  riskDecision: RiskDecision;
+  /** Human-readable; clients MUST branch on `code`. */
+  message: string;
+  /** Pipeline stage or adaptive step id that produced it. */
+  stage: PipelineStageName | AdaptiveStepId;
+  invariantId?: InvariantId;
+  /** /v1/verify reason code for IDENTITY_DENIED / DELEGATION_DENIED / DELEGATION_MAX_EXCEEDED. */
+  identityReasonCode?: ReasonCode;
+  evidenceRefs?: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Investigations (investigation-pipeline.md)
+// ---------------------------------------------------------------------------
+
+export type InvestigationTrigger = 'api' | 'sanctions_change' | 'manual';
+export type InvestigationStatus = 'DECIDED' | 'AWAITING_REVIEW' | 'CONFIRMED';
+export type StageEngine =
+  | 'code'
+  | 'find'
+  | 'aggregate'
+  | '$search'
+  | '$vectorSearch'
+  | 'find+$search'
+  | 'find+code'
+  | 'find+aggregate';
+export type StageStatus = 'passed' | 'failed' | 'flagged' | 'skipped' | 'error';
+
+/** Signed `context` of an investigated payment (integers only; amount in USDC minor units, 6 decimals). */
+export interface PaymentContext {
+  amount: number;
+  currency: 'USDC';
+  counterparty: EvmAddress;
+  counterpartyName?: string;
+  /** Defaults to the agent's first wallet. */
+  wallet?: EvmAddress;
+}
+
+/** POST /v1/investigations body: a VerifyRequest whose signed context is a PaymentContext. */
+export interface InvestigationRequest extends VerifyRequest {
+  context: PaymentContext & { [key: string]: ContextValue };
+}
+
+export interface EvidenceItem {
+  id: string;
+  kind: 'identity' | 'delegation' | 'sanctions_exact' | 'sanctions_fuzzy' | 'signal' | 'memory' | 'invariant' | 'policy' | 'passport' | 'step';
+  /** Collection or module, e.g. "sanctions", "security_memories". */
+  source: string;
+  ref: string | null;
+  summary: string;
+  data: Record<string, unknown>;
+}
+
+export interface StageResult {
+  name: PipelineStageName | AdaptiveStepId;
+  engine: StageEngine;
+  status: StageStatus;
+  startedAt: IsoDateTime;
+  durationMs: number;
+  result: Record<string, unknown>;
+  evidence: EvidenceItem[];
+  reasons: RiskReason[];
+}
+
+export interface MemoryHit {
+  memoryId: MemoryId;
+  title: string;
+  /** Always VERIFIED (INV_UNVERIFIED_MEMORY_NOT_PRECEDENT). */
+  status: 'VERIFIED';
+  outcome: Outcome;
+  /** $meta vectorSearchScore (API only; hashed forms use scorePpm). */
+  score: number;
+  scorePpm: number;
+  signals: Signal[];
+  recommendedSteps: AdaptiveStepId[];
+  usedAsPrecedent: boolean;
+}
+
+export interface InvestigationTransaction {
+  asset: 'USDC';
+  /** Minor units; null for sanctions_change re-screens. */
+  amount: number | null;
+  wallet: EvmAddress;
+  counterparty: { address: EvmAddress; name: string | null };
+}
+
+export interface Investigation {
+  id: InvestigationId;
+  trigger: InvestigationTrigger;
+  status: InvestigationStatus;
+  agentId: AgentId;
+  principalId: PrincipalId | null;
+  businessId: BusinessId | null;
+  delegationId: DelegationId | null;
+  delegationVersion: number | null;
+  action: Action | null;
+  transaction: InvestigationTransaction | null;
+  harnessVersion: number;
+  stages: StageResult[];
+  signals: Signal[];
+  memory: { engine: '$vectorSearch'; k: number; minScorePpm: number; hits: MemoryHit[] };
+  /** Identity-layer verdict (same vocabulary as /v1/verify). */
+  decision: Decision;
+  riskDecision: RiskDecision;
+  /** Sorted by precedence; reasons[0] is primary. ALLOW => [{ code: 'CLEAR' }]. */
+  reasons: RiskReason[];
+  outcome: Outcome | null;
+  passport: { id: PassportId; before: PassportStatus; after: PassportStatus } | null;
+  receiptId: ReceiptId;
+  receiptHash: string;
+  requestId: string | null;
+  createdAt: IsoDateTime;
+  decidedAt: IsoDateTime;
+  confirmedAt: IsoDateTime | null;
+}
+
+export interface ConfirmInvestigationRequest {
+  outcome: Outcome;
+  note?: string;
+  /** Human approval of the proposed harness adaptation; false => proposal recorded as rejected. */
+  approveAdaptation: boolean;
+}
+
+export interface ConfirmInvestigationResponse {
+  investigation: Investigation;
+  memory: { id: MemoryId; status: 'VERIFIED' | 'REJECTED' };
+  adaptation: {
+    proposed: boolean;
+    applied: boolean;
+    eventId: string | null;
+    fromVersion: number;
+    toVersion: number | null;
+    diff: JsonPatchOp[];
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Passports (passport.md)
+// ---------------------------------------------------------------------------
+
+export const PASSPORT_STATUSES = ['ACTIVE', 'REVIEW', 'RE_SCREENING', 'SUSPENDED', 'REVOKED'] as const;
+export type PassportStatus = (typeof PASSPORT_STATUSES)[number];
+
+export interface ActorRef {
+  role: Role | 'system';
+  apiKeyId: ApiKeyId | null;
+  ownerId: string | null;
+}
+
+export interface PassportStatusChange {
+  status: PassportStatus;
+  at: IsoDateTime;
+  actor: ActorRef;
+  reason: string | null;
+  investigationId: InvestigationId | null;
+}
+
+export interface Passport {
+  id: PassportId;
+  agentId: AgentId;
+  principalId: PrincipalId;
+  delegationId: DelegationId;
+  delegationVersion: number;
+  wallet: EvmAddress;
+  status: PassportStatus;
+  statusReason: string | null;
+  credentialId: CredentialId | null;
+  lastInvestigationId: InvestigationId | null;
+  sanctionsDatasetVersion: string;
+  harnessVersion: number;
+  issuedAt: IsoDateTime;
+  expiresAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+  statusHistory: PassportStatusChange[];
+}
+
+/** Business view of a passport (public fields only). */
+export type PassportPublicView = Pick<Passport, 'agentId' | 'principalId' | 'status' | 'harnessVersion' | 'sanctionsDatasetVersion' | 'updatedAt'>;
+
+export interface PassportTransitionRequest {
+  to: PassportStatus;
+  reason: string;
+}
+
+/** Optional claims added to CredentialClaims when a passport exists (passport.md §5). */
+export interface PassportCredentialClaims extends CredentialClaims {
+  kya_passport?: PassportId;
+  kya_delegation_v?: number;
+  kya_harness_v?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Harness (harness.md)
+// ---------------------------------------------------------------------------
+
+export interface HarnessPolicy {
+  /** Core stages in fixed order, adaptive steps between 'memory' and 'policy'; 'decision' implicit. */
+  steps: Array<Exclude<PipelineStageName, 'decision'> | AdaptiveStepId>;
+  memoryRetrieval: { k: number; numCandidates: number; minScorePpm: number; filter: { status: 'VERIFIED' } };
+  sanctionsFuzzy?: { minScorePpm: number; limit: number };
+  contextAssembly: { maxMemories: number; includeSignalStats: boolean; includeSanctionsEvidence: boolean };
+  evidenceRequests: Array<{ id: string; stage: string; description: string }>;
+  escalation: Array<{
+    id: string;
+    when: {
+      precedentOutcomeIn?: Outcome[];
+      signalsAll?: Signal[];
+      signalsAnyMin?: { of: Signal[]; min: number };
+      sanctionsFuzzyHit?: true;
+    };
+    then: { riskDecision: 'REVIEW'; reasonCode: 'MEMORY_PRECEDENT_TAKEOVER' | 'BEHAVIOR_ESCALATION' | 'SANCTIONS_FUZZY_MATCH' };
+  }>;
+}
+
+/** RFC 6902 subset; paths restricted to the adaptable keys (harness.md §2). */
+export interface JsonPatchOp {
+  op: 'add' | 'remove' | 'replace';
+  path: string;
+  value?: unknown;
+}
+
+export interface HarnessVersion {
+  version: number;
+  status: 'active' | 'superseded';
+  parentVersion: number | null;
+  invariantsHash: string;
+  policy: HarnessPolicy;
+  policyHash: string;
+  createdAt: IsoDateTime;
+  approvedBy: ActorRef & { label?: 'seed' };
+  sourceEventId: string | null;
+}
+
+export interface HarnessEvent {
+  id: string; // hev_...
+  type: 'adaptation.applied' | 'adaptation.rejected';
+  fromVersion: number;
+  toVersion: number | null;
+  diff: JsonPatchOp[];
+  oldPolicy: HarnessPolicy;
+  newPolicy: HarnessPolicy | null;
+  oldPolicyHash: string;
+  newPolicyHash: string | null;
+  invariantsHash: string;
+  evidence: Array<{ type: 'investigation' | 'memory'; id: string }>;
+  proposer: { kind: 'template' | 'llm'; llmMode: 'fixture' | 'live'; model: string | null };
+  approvedBy: ActorRef;
+  approvedAt: IsoDateTime;
+  at: IsoDateTime;
+  auditEventId: string;
+}
+
+// ---------------------------------------------------------------------------
+// Receipts (receipt.schema.json is normative; this is its TypeScript view)
+// ---------------------------------------------------------------------------
+
+export interface Receipt {
+  receiptVersion: 'kya-receipt-v1';
+  receiptId: ReceiptId;
+  investigationId: InvestigationId;
+  trigger: InvestigationTrigger;
+  issuedAt: IsoDateTime;
+  traceId: string | null;
+  decision: Decision;
+  riskDecision: RiskDecision;
+  reasons: Array<Omit<RiskReason, 'message'>>;
+  agent: { id: AgentId; keyThumbprint: string | null; wallet: EvmAddress | null };
+  principal: { id: PrincipalId | null; status: string | null };
+  businessId: BusinessId | null;
+  delegation: {
+    id: DelegationId | null;
+    version: number | null;
+    checked: boolean;
+    asset?: string | null;
+    maxTxAmount?: number | null;
+    dailyLimit?: number | null;
+    spent24h?: number | null;
+    withinMax?: boolean | null;
+    withinDaily?: boolean | null;
+    walletApproved?: boolean | null;
+    assetPermitted?: boolean | null;
+  };
+  transaction: InvestigationTransaction | null;
+  identity: { mode: 'signed' | 'state'; decision: Decision; reasonCode: ReasonCode; verifiedSignature?: boolean };
+  sanctions: {
+    checked: boolean;
+    datasetVersion: string | null;
+    exactHits: Array<{ sanctionsId: string; address: EvmAddress; name: string; programs?: string[] }>;
+    fuzzyHits: Array<{ sanctionsId: string; name: string; matched: string; scorePpm: number }>;
+  };
+  signals: Signal[];
+  memory: {
+    checked: boolean;
+    engine: '$vectorSearch';
+    embeddingModel: string | null;
+    k: number;
+    minScorePpm: number;
+    hits: Array<{ memoryId: MemoryId; status: 'VERIFIED'; outcome: Outcome; scorePpm: number; usedAsPrecedent?: boolean }>;
+  };
+  stages: Array<{ name: string; engine: StageEngine; status: StageStatus; durationMs: number }>;
+  sanctionsDatasetVersion: string | null;
+  /** TRUST_RULES_VERSION + '+inv:' + INVARIANTS_HASH */
+  policyVersion: string;
+  invariantsHash: string;
+  harnessVersion: number;
+  delegationVersion: number | null;
+  passport: { id: PassportId; before: PassportStatus; after: PassportStatus } | null;
+  evidence: Array<Pick<EvidenceItem, 'id' | 'kind' | 'source' | 'ref' | 'summary'>>;
+  /** sha256hex(canonicalJson(receipt without receiptHash and anchor)). */
+  receiptHash: string;
+  anchor?: { auditEventId: string; auditSeq: number; auditHash: string };
+}
+
+// ---------------------------------------------------------------------------
+// Live events (GET /v1/events/stream, text/event-stream)
+// ---------------------------------------------------------------------------
+
+export type HarnessStreamEvent =
+  | { type: 'sanctions.change_detected'; at: IsoDateTime; sanctionsId: string; datasetVersion: string; affectedAgentIds: AgentId[] }
+  | { type: 'passport.status_changed'; at: IsoDateTime; passportId: PassportId; agentId: AgentId; from: PassportStatus | null; to: PassportStatus; investigationId: InvestigationId | null }
+  | { type: 'investigation.decided'; at: IsoDateTime; investigationId: InvestigationId; agentId: AgentId; trigger: InvestigationTrigger; riskDecision: RiskDecision }
+  | { type: 'harness.adapted'; at: IsoDateTime; fromVersion: number; toVersion: number; eventId: string };
+
+/**
+ * Audit event types added to the closed AuditEventType set by the implementing
+ * tasks (T08/T10/T11/T13/T15), together with test/audit.test.js.
+ */
+export const HARNESS_AUDIT_EVENT_TYPES = [
+  'investigation.decided',
+  'investigation.confirmed',
+  'receipt.issued',
+  'passport.issued',
+  'passport.status_changed',
+  'memory.promoted',
+  'memory.rejected',
+  'harness.adapted',
+  'harness.adaptation_rejected',
+  'sanctions.updated',
+] as const;
+export type HarnessAuditEventType = (typeof HARNESS_AUDIT_EVENT_TYPES)[number];
