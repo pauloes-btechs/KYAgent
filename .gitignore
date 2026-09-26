@@ -7,4 +7,5 @@ coverage/
 *.pem
 *.key
 secrets/
+*.tmp
 .DS_Store

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>KYAgent Dashboard</title>
+  <link rel="stylesheet" href="/dashboard/styles.css">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to main content</a>
+
+  <section id="signin" class="signin" aria-labelledby="signin-title">
+    <form id="signin-form" autocomplete="off">
+      <h1 id="signin-title">KYAgent</h1>
+      <p>Paste an admin, operator or business API key.</p>
+      <label for="apikey">API key</label>
+      <div class="row">
+        <input id="apikey" name="apikey" type="password" spellcheck="false" autocomplete="off" required maxlength="100">
+        <button type="button" id="toggle-key" class="secondary" aria-pressed="false">Show</button>
+      </div>
+      <button type="submit" class="primary">Sign in</button>
+      <p class="notice">Key is kept in this tab's memory only and cleared on reload.</p>
+      <p id="signin-error" class="error" role="alert"></p>
+    </form>
+  </section>
+
+  <div id="shell" class="shell" hidden>
+    <nav id="nav" class="nav" aria-label="Main"></nav>
+    <div class="main-col">
+      <header class="topbar">
+        <strong>KYAgent</strong>
+        <span id="page-title" class="crumb"></span>
+        <span class="spacer"></span>
+        <span id="env-chip" class="chip warn" hidden>In-memory store — data is not persisted</span>
+        <span id="role-chip" class="chip mono"></span>
+        <button type="button" id="signout" class="secondary">Sign out</button>
+      </header>
+      <main id="content" tabindex="-1"></main>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <script type="module" src="/dashboard/app.js"></script>
+</body>
+</html>
