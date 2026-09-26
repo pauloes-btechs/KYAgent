@@ -19,6 +19,7 @@ export const ID_PREFIX = {
   credential: 'crd',
   apiKey: 'key',
   verification: 'vrf',
+  auditEvent: 'aud',
 } as const;
 
 export type OperatorId = string; // op_...
@@ -163,6 +164,32 @@ export interface Agent {
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
   revokedAt: IsoDateTime | null;
+}
+
+/** REQ-019: advisory, rule-based trust score (GET /v1/agents/{id}/trust-score). */
+export type TrustLevel = 'high' | 'medium' | 'low' | 'untrusted';
+
+export interface TrustFactor {
+  code: 'operator_verification' | 'agent_age' | 'revocation_history' | 'scope_breadth';
+  label: string;
+  points: number;
+  maxPoints: number;
+  detail: string;
+  inputs: Record<string, unknown>;
+}
+
+export interface TrustScore {
+  agentId: AgentId;
+  operatorId: OperatorId;
+  rulesVersion: 'kya-trust-v1';
+  score: number;
+  maxScore: 100;
+  level: TrustLevel;
+  /** Hard-gate failures (agent not active / operator not verified); non-empty => score 0. */
+  gates: string[];
+  factors: TrustFactor[];
+  computedAt: IsoDateTime;
+  advisory: string;
 }
 
 export interface CreateAgentRequest {
@@ -376,6 +403,45 @@ export interface VerificationEvent extends VerifyResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Audit log (REQ-008) — append-only, hash-chained
+// ---------------------------------------------------------------------------
+
+export type AuditEventType =
+  | 'operator.created'
+  | 'operator.verification_completed'
+  | 'operator.suspended'
+  | 'business.created'
+  | 'api_key.created'
+  | 'api_key.revoked'
+  | 'agent.registered'
+  | 'agent.suspended'
+  | 'agent.reactivated'
+  | 'agent.revoked'
+  | 'grant.created'
+  | 'grant.revoked'
+  | 'credential.issued'
+  | 'credential.revoked'
+  | 'verification.decided';
+
+export interface AuditEvent {
+  id: string; // aud_...
+  /** Contiguous from 1; unique. */
+  seq: number;
+  type: AuditEventType;
+  occurredAt: IsoDateTime;
+  actor: { role: Role | 'system'; apiKeyId: string | null; ownerId: string | null };
+  subjectType: 'operator' | 'business' | 'api_key' | 'agent' | 'grant' | 'credential' | 'verification';
+  subjectId: string;
+  requestId: string | null;
+  /** Ids and non-secret metadata only. */
+  data: Record<string, unknown>;
+  /** Hash of the previous event (64 zeros for seq 1). */
+  prevHash: string;
+  /** SHA-256 hex of canonical JSON of all fields above except `hash`. */
+  hash: string;
+}
+
+// ---------------------------------------------------------------------------
 // Errors (non-decision HTTP errors)
 // ---------------------------------------------------------------------------
 
@@ -389,6 +455,7 @@ export const ERROR_CODES = {
   OPERATOR_NOT_VERIFIED: 409,
   PAYLOAD_TOO_LARGE: 413,
   UNSUPPORTED_MEDIA_TYPE: 415,
+  RATE_LIMITED: 429,
   INTERNAL_ERROR: 500,
   SERVICE_UNAVAILABLE: 503,
 } as const;
