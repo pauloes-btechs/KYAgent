@@ -15,6 +15,7 @@ import { apiKeyService } from './services/apiKeys.js';
 import { AUDIT_EVENT_TYPES, auditService } from './services/audit.js';
 import { credentialService } from './services/credentials.js';
 import { grantService } from './services/grants.js';
+import { investigationService } from './services/investigations.js';
 import { businessService, operatorService } from './services/operators.js';
 import { trustService } from './services/trust.js';
 import { verificationService } from './services/verification.js';
@@ -148,6 +149,7 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
     credentials: credentialService(deps),
     verification: verificationService(deps),
     trust: trustService(deps),
+    investigations: investigationService(deps),
   };
   const s = services;
   const dashboard = loadDashboard();
@@ -189,6 +191,8 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
     { m: 'POST', p: '/v1/credentials/:id/revoke', roles: ALL, body: 'json', h: (c) => s.credentials.revoke(c.principal, c.id, c.body) },
 
     { m: 'POST', p: '/v1/verify', roles: ['business'], body: 'verify', rateLimit: 'verify', h: null },
+    // Investigation pipeline (trigger `api`); the handler returns { status, body }: 201, or 500 fail-closed BLOCK.
+    { m: 'POST', p: '/v1/investigations', roles: ['admin', 'business'], body: 'json', rateLimit: 'verify', dynamicStatus: true, h: (c) => s.investigations.create(c.principal, c.body, c.requestId) },
     { m: 'GET', p: '/v1/audit-events', roles: ['admin'], query: { type: q.auditType, subjectId: q.str64 }, h: (c) => s.audit.list(c.principal, c.query) },
     { m: 'GET', p: '/v1/audit-events/integrity', roles: ['admin'], h: () => s.audit.verifyChain() },
     { m: 'GET', p: '/v1/verifications', roles: ['admin', 'business'], query: { agentId: q.str64, decision: q.decision }, h: (c) => s.verification.list(c.principal, c.query) },
@@ -341,6 +345,7 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
         body = parsed.body;
       }
       const result = await route.h({ principal, id, query, body, requestId });
+      if (route.dynamicStatus) return send(res, result.status, result.body, requestId);
       return send(res, route.status ?? 200, result, requestId, route.noStore ? { 'Cache-Control': 'no-store' } : {});
     } catch (err) {
       const apiErr = toApiError(err);
