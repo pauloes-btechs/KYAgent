@@ -1,0 +1,9 @@
+{
+  "_id": "upd_2026-09-26",
+  "datasetVersion": "2026-09-26",
+  "source": "fixture",
+  "notice": "Demo fixture, NOT an official sanctions update. The entity and its aliases are fictional and the wallet is synthetic. It designates the wallet of TreasuryBot's existing counterparty 'Meridian OTC Desk' (fixtures/transactions/treasurybot.json, counterparty B), so applying it must trigger re-screening and suspend TreasuryBot's passport.",
+  "upserts": [
+    { "_id": "sdn_MERIDIAN_OTC", "name": "Meridian OTC Desk", "aliases": ["Meridian OTC", "Meridian Over-the-Counter Desk"], "type": "entity", "programs": ["CYBER2"], "wallets": [{ "chain": "evm", "address": "0x4b1d000000000000000000000000000000000b02" }] }
+  ]
+}

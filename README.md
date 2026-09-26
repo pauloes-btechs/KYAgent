@@ -21,24 +21,35 @@ and crypto.
 You need Node.js 20 or later. There are no dependencies to install.
 
 ```bash
-npm test          # full test suite (node:test)
-npm run demo      # starts the API + dashboard in memory and runs the whole flow
+npm test                        # full test suite (node:test)
+npm run example:sdk             # in-memory SDK walkthrough: signed requests -> ALLOW / DENY
 ```
 
-`npm run demo` prints each decision as it runs, for example:
+### Hackathon demo (MongoDB Atlas required)
 
-```
-  ALLOW ALLOWED                  payments:create 1500 USD with credential
-  DENY  CONSTRAINT_VIOLATION     payments:create 50000 USD (over limit)
-  DENY  NONCE_REPLAYED           same request replayed
-  DENY  CREDENTIAL_REVOKED       credential after revocation
-  DENY  AGENT_REVOKED            agent after revocation
+The live demo runs only on MongoDB Atlas (`MONGODB_URI`, database `MONGODB_DB`,
+default `kyagent`). It never falls back to the in-memory store: without
+`MONGODB_URI` it exits 1 with `Atlas required`.
+
+```bash
+make demo-reset        # restore the exact judging scenario (idempotent)
+make demo              # API + dashboard on Atlas over that scenario
+make demo CHECK=1      # headless scenario + search-index check
 ```
 
-It then prints the dashboard URL (`http://127.0.0.1:8080/dashboard/`) and three
-**demo-only** API keys (admin, operator, business). Paste one of them into the
-dashboard to see agents, grants, credentials and the verification audit log.
-These keys are ephemeral. They stop working as soon as the demo process exits.
+`make demo-reset` removes the demo documents, empties `investigations`,
+`harness_events`, `watcher_state`, `passports` and `receipts`, runs the migrations,
+creates the Atlas Search / Vector Search indexes, and re-seeds the scenario from
+`fixtures/` (`src/seed/hackathon.js`): principal `op_NORTHWIND`, agent
+`agt_TREASURYBOT` with its wallet, delegation `grt_TB_USDC`, 30 USDC transactions,
+three security memories, the baseline sanctions list, the staged update
+`upd_2026-09-26`, passport `pp_TREASURYBOT`, and harness v1. It exits 0 only after
+real `$search` and `$vectorSearch` queries answer over the seeded data and the
+document counts match the scenario.
+
+`make demo` prints the dashboard URL (`http://127.0.0.1:8080/dashboard/`) and three
+**demo-only** API keys (admin, operator, business). They are stored as hashes tagged
+`demo: true` and deleted by the next `make demo` or `make demo-reset`.
 
 ## Running the server
 

@@ -1,0 +1,19 @@
+{
+  "_id": "mem_INV-1101",
+  "title": "Suspected treasury agent takeover (unreviewed)",
+  "summary": "Candidate memory with the same signal pattern as INV-1042, never reviewed by an analyst. It must never be used as precedent (INV_UNVERIFIED_MEMORY_NOT_PRECEDENT), even though it is the closest possible vector match.",
+  "status": "UNVERIFIED",
+  "outcome": null,
+  "signals": ["SIGNING_KEY_CHANGED", "NEW_COUNTERPARTY", "AMOUNT_ANOMALY", "NEAR_CEILING"],
+  "embeddingRef": {
+    "file": "fixtures/embeddings.json",
+    "sha256": "1c345766d7cef7e2d725e32f827d8eb04cf26e4bcbb2a459a29f8e1ca56a65ee"
+  },
+  "recommendedSteps": ["signing_key_history_check"],
+  "sourceInvestigationId": "INV-1101",
+  "agentId": null,
+  "principalId": null,
+  "verifiedBy": null,
+  "createdDaysAgo": 5,
+  "verifiedDaysAgo": null
+}
