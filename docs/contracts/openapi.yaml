@@ -1,0 +1,1025 @@
+openapi: 3.1.0
+info:
+  title: KYAgent API
+  version: 1.0.0
+  description: |
+    Know Your Agent — identity verification and authorization for autonomous AI agents.
+    Normative companions: ARCHITECTURE.md, docs/contracts/types.ts, error-model.md,
+    crypto-and-signing.md. All request bodies are strict (additionalProperties: false).
+    Authentication: `Authorization: Bearer kya_<keyId>_<secret>`. RBAC per ARCHITECTURE.md §5.
+    Cross-tenant access returns 404.
+servers:
+  - url: http://localhost:8080
+security:
+  - apiKey: []
+tags:
+  - name: system
+  - name: businesses
+  - name: operators
+  - name: api-keys
+  - name: agents
+  - name: grants
+  - name: credentials
+  - name: verification
+
+paths:
+  /healthz:
+    get:
+      tags: [system]
+      security: []
+      operationId: health
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthResponse' }
+        '503': { $ref: '#/components/responses/Error' }
+
+  /.well-known/jwks.json:
+    get:
+      tags: [system]
+      security: []
+      operationId: jwks
+      description: Public key(s) used to sign credentials.
+      responses:
+        '200':
+          description: JWKS
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Jwks' }
+
+  # ------------------------------------------------------------------ businesses
+  /v1/businesses:
+    post:
+      tags: [businesses]
+      operationId: createBusiness
+      x-roles: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateBusinessRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Business' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+    get:
+      tags: [businesses]
+      operationId: listBusinesses
+      x-roles: [admin]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Page of businesses
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Business' } }
+                  nextCursor: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /v1/businesses/{id}:
+    get:
+      tags: [businesses]
+      operationId: getBusiness
+      x-roles: [admin, business(own)]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Business
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Business' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  # ------------------------------------------------------------------ operators
+  /v1/operators:
+    post:
+      tags: [operators]
+      operationId: createOperator
+      x-roles: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateOperatorRequest' }
+      responses:
+        '201':
+          description: Created (status pending)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Operator' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+    get:
+      tags: [operators]
+      operationId: listOperators
+      x-roles: [admin]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/OperatorStatus' }
+      responses:
+        '200':
+          description: Page of operators
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Operator' } }
+                  nextCursor: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /v1/operators/{id}:
+    get:
+      tags: [operators]
+      operationId: getOperator
+      x-roles: [admin, operator(own), business]
+      description: Admin and the owning operator get `Operator`; businesses get `OperatorPublicProfile`.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Operator
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Operator'
+                  - $ref: '#/components/schemas/OperatorPublicProfile'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /v1/operators/{id}/verification:
+    post:
+      tags: [operators]
+      operationId: verifyOperator
+      x-roles: [admin]
+      description: |
+        Runs mock KYC + sanctions screening (data-schema.md "Mock KYC/sanctions").
+        Allowed from `pending` or `rejected`; otherwise 409 INVALID_STATE.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Operator with verification result (status verified or rejected)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Operator' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /v1/operators/{id}/suspend:
+    post:
+      tags: [operators]
+      operationId: suspendOperator
+      x-roles: [admin]
+      description: Suspends a verified operator. All its agents DENY with OPERATOR_SUSPENDED; its API keys stop authenticating.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: Suspended operator
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Operator' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  # ------------------------------------------------------------------ api keys
+  /v1/api-keys:
+    post:
+      tags: [api-keys]
+      operationId: createApiKey
+      x-roles: [admin]
+      description: |
+        `ownerId` required (and must exist) for role operator/business; must be null/absent for admin.
+        The plaintext `secret` is returned only in this response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateApiKeyRequest' }
+      responses:
+        '201':
+          description: Created
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreateApiKeyResponse' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    get:
+      tags: [api-keys]
+      operationId: listApiKeys
+      x-roles: [admin]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: ownerId
+          in: query
+          schema: { type: string, maxLength: 64 }
+      responses:
+        '200':
+          description: Page of API keys (never includes secrets or hashes)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/ApiKey' } }
+                  nextCursor: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /v1/api-keys/{id}/revoke:
+    post:
+      tags: [api-keys]
+      operationId: revokeApiKey
+      x-roles: [admin]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Revoked key
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiKey' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  # ------------------------------------------------------------------ agents
+  /v1/agents:
+    post:
+      tags: [agents]
+      operationId: registerAgent
+      x-roles: [operator]
+      description: |
+        Registers an agent bound to the calling operator. Operator must be `verified`
+        (else 409 OPERATOR_NOT_VERIFIED). `proofOfPossession` per crypto-and-signing.md §2.
+        Duplicate public key => 409 CONFLICT.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAgentRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agent' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+    get:
+      tags: [agents]
+      operationId: listAgents
+      x-roles: [admin, operator(own)]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: operatorId
+          in: query
+          description: Admin only filter; ignored (forced to self) for operators.
+          schema: { type: string, maxLength: 64 }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/AgentStatus' }
+      responses:
+        '200':
+          description: Page of agents
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Agent' } }
+                  nextCursor: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /v1/agents/{id}:
+    get:
+      tags: [agents]
+      operationId: getAgent
+      x-roles: [admin, operator(own), business]
+      description: Identity lookup. Businesses may read any agent (public identity).
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Agent
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agent' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /v1/agents/{id}/suspend:
+    post:
+      tags: [agents]
+      operationId: suspendAgent
+      x-roles: [admin, operator(own)]
+      description: active -> suspended. Verifications DENY with AGENT_SUSPENDED.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: Agent
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agent' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /v1/agents/{id}/reactivate:
+    post:
+      tags: [agents]
+      operationId: reactivateAgent
+      x-roles: [admin, operator(own)]
+      description: suspended -> active. Not allowed from revoked (409 INVALID_STATE).
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Agent
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agent' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /v1/agents/{id}/revoke:
+    post:
+      tags: [agents]
+      operationId: revokeAgent
+      x-roles: [admin, operator(own)]
+      description: Permanent. Effective immediately for all subsequent verifications (AGENT_REVOKED).
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: Revoked agent
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agent' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /v1/agents/{id}/credentials:
+    post:
+      tags: [credentials]
+      operationId: issueCredential
+      x-roles: [operator(own)]
+      description: Issues a signed, expiring, scoped, key-bound credential for a grant (crypto-and-signing.md §4).
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IssueCredentialRequest' }
+      responses:
+        '201':
+          description: Issued
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IssueCredentialResponse' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  # ------------------------------------------------------------------ grants
+  /v1/grants:
+    post:
+      tags: [grants]
+      operationId: createGrant
+      x-roles: [business]
+      description: Calling business authorizes an active agent for actions until expiresAt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateGrantRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Grant' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+    get:
+      tags: [grants]
+      operationId: listGrants
+      x-roles: [admin, business(own), operator(own agents)]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: agentId
+          in: query
+          schema: { type: string, maxLength: 64 }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/GrantStatus' }
+      responses:
+        '200':
+          description: Page of grants
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Grant' } }
+                  nextCursor: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /v1/grants/{id}:
+    get:
+      tags: [grants]
+      operationId: getGrant
+      x-roles: [admin, business(own), operator(own agents)]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Grant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Grant' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /v1/grants/{id}/revoke:
+    post:
+      tags: [grants]
+      operationId: revokeGrant
+      x-roles: [admin, business(own)]
+      description: Permanent. Credentials derived from it DENY with GRANT_REVOKED.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: Revoked grant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Grant' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  # ------------------------------------------------------------------ credentials
+  /v1/credentials:
+    get:
+      tags: [credentials]
+      operationId: listCredentials
+      x-roles: [admin, operator(own agents), business(audience)]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: agentId
+          in: query
+          schema: { type: string, maxLength: 64 }
+        - name: grantId
+          in: query
+          schema: { type: string, maxLength: 64 }
+      responses:
+        '200':
+          description: Page of credential records (no JWS)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/CredentialRecord' } }
+                  nextCursor: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /v1/credentials/{id}:
+    get:
+      tags: [credentials]
+      operationId: getCredential
+      x-roles: [admin, operator(own agents), business(audience)]
+      description: Status lookup by jti (for revocation checks).
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Credential record
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CredentialRecord' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /v1/credentials/{id}/revoke:
+    post:
+      tags: [credentials]
+      operationId: revokeCredential
+      x-roles: [admin, operator(own agents), business(audience)]
+      description: Permanent; subsequent verifications DENY with CREDENTIAL_REVOKED.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: Revoked credential record
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CredentialRecord' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  # ------------------------------------------------------------------ verification
+  /v1/verify:
+    post:
+      tags: [verification]
+      operationId: verify
+      x-roles: [business]
+      description: |
+        Deny-by-default ALLOW/DENY decision for an agent's signed action request
+        (ARCHITECTURE.md §3). Malformed or oversized bodies yield 200 DENY MALFORMED_REQUEST
+        (not 400). Internal failures yield 500 with a DENY/INTERNAL_ERROR decision body.
+        Only 401/403 use the standard error envelope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerifyRequest' }
+      responses:
+        '200':
+          description: Decision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VerifyResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '500':
+          description: Evaluation failed — fail closed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VerifyResponse' }
+
+  /v1/verifications:
+    get:
+      tags: [verification]
+      operationId: listVerifications
+      x-roles: [admin, business(own)]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: agentId
+          in: query
+          schema: { type: string, maxLength: 64 }
+        - name: decision
+          in: query
+          schema: { $ref: '#/components/schemas/Decision' }
+      responses:
+        '200':
+          description: Page of verification events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/VerificationEvent' } }
+                  nextCursor: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: 'kya_<keyId>_<secret>'
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z]{2,3}_[0-9A-HJKMNP-TV-Z]{26}$' }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string, maxLength: 200 }
+
+  responses:
+    Error:
+      description: Error envelope (error-model.md)
+      headers:
+        X-Request-Id: { schema: { type: string } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+
+  schemas:
+    # ---------- primitives
+    IsoDateTime: { type: string, format: date-time }
+    ResourceId: { type: string, pattern: '^[a-z]{2,3}_[0-9A-HJKMNP-TV-Z]{26}$' }
+    Ed25519PublicKey:
+      type: string
+      pattern: '^[A-Za-z0-9_-]{43}$'
+      description: base64url (no padding) raw 32-byte Ed25519 public key
+    Ed25519Signature:
+      type: string
+      pattern: '^[A-Za-z0-9_-]{86}$'
+      description: base64url (no padding) 64-byte Ed25519 signature
+    Action:
+      type: string
+      maxLength: 128
+      pattern: '^[a-z0-9_-]+(:[a-z0-9_-]+)*$'
+    ActionPattern:
+      type: string
+      maxLength: 128
+      pattern: '^[a-z0-9_-]+(:[a-z0-9_-]+)*(:\*)?$'
+    ReasonRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 500 }
+
+    HealthResponse:
+      type: object
+      required: [status, store]
+      properties:
+        status: { type: string, const: ok }
+        store: { type: string, enum: [memory, mongo] }
+
+    Jwks:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            required: [kty, crv, x, kid, alg, use]
+            properties:
+              kty: { const: OKP }
+              crv: { const: Ed25519 }
+              x: { type: string }
+              kid: { type: string }
+              alg: { const: EdDSA }
+              use: { const: sig }
+
+    ErrorBody:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code:
+              type: string
+              enum: [VALIDATION_ERROR, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, CONFLICT, INVALID_STATE,
+                     OPERATOR_NOT_VERIFIED, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE, INTERNAL_ERROR,
+                     SERVICE_UNAVAILABLE]
+            message: { type: string }
+            requestId: { type: string }
+            details:
+              type: array
+              items:
+                type: object
+                required: [path, message]
+                properties:
+                  path: { type: string }
+                  message: { type: string }
+
+    # ---------- api keys
+    Role: { type: string, enum: [admin, operator, business] }
+    ApiKey:
+      type: object
+      required: [id, name, role, ownerId, status, displayPrefix, createdAt, lastUsedAt, revokedAt]
+      properties:
+        id: { $ref: '#/components/schemas/ResourceId' }
+        name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        ownerId: { type: [string, 'null'] }
+        status: { type: string, enum: [active, revoked] }
+        displayPrefix: { type: string }
+        createdAt: { $ref: '#/components/schemas/IsoDateTime' }
+        lastUsedAt: { type: [string, 'null'], format: date-time }
+        revokedAt: { type: [string, 'null'], format: date-time }
+    CreateApiKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [name, role]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        role: { $ref: '#/components/schemas/Role' }
+        ownerId: { type: [string, 'null'], maxLength: 64 }
+    CreateApiKeyResponse:
+      type: object
+      required: [apiKey, secret]
+      properties:
+        apiKey: { $ref: '#/components/schemas/ApiKey' }
+        secret: { type: string, description: 'Plaintext key, shown once' }
+
+    # ---------- businesses
+    Business:
+      type: object
+      required: [id, name, status, createdAt]
+      properties:
+        id: { $ref: '#/components/schemas/ResourceId' }
+        name: { type: string }
+        status: { type: string, enum: [active, suspended] }
+        createdAt: { $ref: '#/components/schemas/IsoDateTime' }
+    CreateBusinessRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+
+    # ---------- operators
+    OperatorStatus: { type: string, enum: [pending, verified, rejected, suspended] }
+    OperatorType: { type: string, enum: [individual, organization] }
+    OperatorVerification:
+      type: object
+      required: [method, kycResult, sanctionsMode, sanctionsResult, checkedAt]
+      properties:
+        method: { const: mock }
+        kycResult: { type: string, enum: [pass, fail] }
+        sanctionsMode: { type: string, enum: [mock, 'off'] }
+        sanctionsResult: { type: string, enum: [clear, hit, skipped] }
+        checkedAt: { $ref: '#/components/schemas/IsoDateTime' }
+    Operator:
+      type: object
+      required: [id, type, legalName, contactEmail, country, status, verification, statusReason, createdAt, updatedAt]
+      properties:
+        id: { $ref: '#/components/schemas/ResourceId' }
+        type: { $ref: '#/components/schemas/OperatorType' }
+        legalName: { type: string }
+        contactEmail: { type: string, format: email }
+        country: { type: string, pattern: '^[A-Z]{2}$' }
+        status: { $ref: '#/components/schemas/OperatorStatus' }
+        verification:
+          oneOf:
+            - $ref: '#/components/schemas/OperatorVerification'
+            - type: 'null'
+        statusReason: { type: [string, 'null'] }
+        createdAt: { $ref: '#/components/schemas/IsoDateTime' }
+        updatedAt: { $ref: '#/components/schemas/IsoDateTime' }
+    OperatorPublicProfile:
+      type: object
+      required: [id, type, legalName, country, status]
+      properties:
+        id: { $ref: '#/components/schemas/ResourceId' }
+        type: { $ref: '#/components/schemas/OperatorType' }
+        legalName: { type: string }
+        country: { type: string }
+        status: { $ref: '#/components/schemas/OperatorStatus' }
+    CreateOperatorRequest:
+      type: object
+      additionalProperties: false
+      required: [type, legalName, contactEmail, country]
+      properties:
+        type: { $ref: '#/components/schemas/OperatorType' }
+        legalName: { type: string, minLength: 1, maxLength: 200 }
+        contactEmail: { type: string, format: email, maxLength: 254 }
+        country: { type: string, pattern: '^[A-Z]{2}$' }
+
+    # ---------- agents
+    AgentStatus: { type: string, enum: [active, suspended, revoked] }
+    Agent:
+      type: object
+      required: [id, operatorId, name, description, publicKey, keyThumbprint, status, statusReason, createdAt, updatedAt, revokedAt]
+      properties:
+        id: { $ref: '#/components/schemas/ResourceId' }
+        operatorId: { $ref: '#/components/schemas/ResourceId' }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        publicKey: { $ref: '#/components/schemas/Ed25519PublicKey' }
+        keyThumbprint: { type: string }
+        status: { $ref: '#/components/schemas/AgentStatus' }
+        statusReason: { type: [string, 'null'] }
+        createdAt: { $ref: '#/components/schemas/IsoDateTime' }
+        updatedAt: { $ref: '#/components/schemas/IsoDateTime' }
+        revokedAt: { type: [string, 'null'], format: date-time }
+    CreateAgentRequest:
+      type: object
+      additionalProperties: false
+      required: [name, publicKey, proofOfPossession]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 1000 }
+        publicKey: { $ref: '#/components/schemas/Ed25519PublicKey' }
+        proofOfPossession: { $ref: '#/components/schemas/Ed25519Signature' }
+
+    # ---------- grants
+    GrantStatus: { type: string, enum: [active, revoked] }
+    GrantConstraints:
+      type: object
+      additionalProperties: false
+      properties:
+        maxAmount: { type: integer, minimum: 0, maximum: 9007199254740991 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        resources:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 256, pattern: '^[^\n\r]+$' }
+    Grant:
+      type: object
+      required: [id, businessId, agentId, operatorId, actions, constraints, status, expiresAt, createdAt, revokedAt, statusReason]
+      properties:
+        id: { $ref: '#/components/schemas/ResourceId' }
+        businessId: { $ref: '#/components/schemas/ResourceId' }
+        agentId: { $ref: '#/components/schemas/ResourceId' }
+        operatorId: { $ref: '#/components/schemas/ResourceId' }
+        actions: { type: array, items: { $ref: '#/components/schemas/ActionPattern' } }
+        constraints: { $ref: '#/components/schemas/GrantConstraints' }
+        status: { $ref: '#/components/schemas/GrantStatus' }
+        expiresAt: { $ref: '#/components/schemas/IsoDateTime' }
+        createdAt: { $ref: '#/components/schemas/IsoDateTime' }
+        revokedAt: { type: [string, 'null'], format: date-time }
+        statusReason: { type: [string, 'null'] }
+    CreateGrantRequest:
+      type: object
+      additionalProperties: false
+      required: [agentId, actions, expiresAt]
+      properties:
+        agentId: { $ref: '#/components/schemas/ResourceId' }
+        actions:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/ActionPattern' }
+        constraints: { $ref: '#/components/schemas/GrantConstraints' }
+        expiresAt:
+          $ref: '#/components/schemas/IsoDateTime'
+          description: Future, at most now + 365 days (else 400 VALIDATION_ERROR)
+
+    # ---------- credentials
+    CredentialRecord:
+      type: object
+      required: [id, agentId, operatorId, businessId, grantId, actions, status, issuedAt, expiresAt, revokedAt, statusReason]
+      properties:
+        id: { $ref: '#/components/schemas/ResourceId' }
+        agentId: { $ref: '#/components/schemas/ResourceId' }
+        operatorId: { $ref: '#/components/schemas/ResourceId' }
+        businessId: { $ref: '#/components/schemas/ResourceId' }
+        grantId: { $ref: '#/components/schemas/ResourceId' }
+        actions: { type: array, items: { $ref: '#/components/schemas/ActionPattern' } }
+        status: { type: string, enum: [active, revoked] }
+        issuedAt: { $ref: '#/components/schemas/IsoDateTime' }
+        expiresAt: { $ref: '#/components/schemas/IsoDateTime' }
+        revokedAt: { type: [string, 'null'], format: date-time }
+        statusReason: { type: [string, 'null'] }
+    IssueCredentialRequest:
+      type: object
+      additionalProperties: false
+      required: [grantId]
+      properties:
+        grantId: { $ref: '#/components/schemas/ResourceId' }
+        ttlSeconds: { type: integer, minimum: 60, maximum: 86400, description: 'Also capped by KYA_CREDENTIAL_MAX_TTL_SECONDS (400 if above)' }
+    IssueCredentialResponse:
+      type: object
+      required: [credential, record]
+      properties:
+        credential: { type: string, description: 'Compact JWS (EdDSA, typ kya-credential+jwt)' }
+        record: { $ref: '#/components/schemas/CredentialRecord' }
+
+    # ---------- verification
+    Decision: { type: string, enum: [ALLOW, DENY] }
+    ReasonCode:
+      type: string
+      enum: [ALLOWED, MALFORMED_REQUEST, AUDIENCE_MISMATCH, AGENT_NOT_FOUND, AGENT_REVOKED, AGENT_SUSPENDED,
+             OPERATOR_NOT_VERIFIED, OPERATOR_SUSPENDED, TIMESTAMP_OUT_OF_WINDOW, SIGNATURE_INVALID, NONCE_REPLAYED,
+             CREDENTIAL_INVALID, CREDENTIAL_NOT_YET_VALID, CREDENTIAL_EXPIRED, CREDENTIAL_SUBJECT_MISMATCH,
+             CREDENTIAL_AUDIENCE_MISMATCH, CREDENTIAL_KEY_MISMATCH, CREDENTIAL_REVOKED, GRANT_REVOKED, GRANT_EXPIRED,
+             NO_GRANT, ACTION_NOT_PERMITTED, CONSTRAINT_VIOLATION, INTERNAL_ERROR]
+    SignedRequest:
+      type: object
+      additionalProperties: false
+      required: [version, agentId, audience, action, resource, contextSha256, timestamp, nonce, signature]
+      properties:
+        version: { const: KYA-SIG-V1 }
+        agentId: { type: string, maxLength: 64, pattern: '^[^\n\r]+$' }
+        audience: { type: string, maxLength: 64, pattern: '^[^\n\r]+$' }
+        action: { $ref: '#/components/schemas/Action' }
+        resource: { type: string, maxLength: 256, pattern: '^[^\n\r]*$' }
+        contextSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        timestamp: { type: integer, minimum: 0, maximum: 9999999999 }
+        nonce: { type: string, pattern: '^[A-Za-z0-9_-]{16,128}$' }
+        signature: { $ref: '#/components/schemas/Ed25519Signature' }
+    VerifyRequest:
+      type: object
+      additionalProperties: false
+      required: [agentId, action, signedRequest]
+      properties:
+        agentId: { type: string, maxLength: 64 }
+        action: { $ref: '#/components/schemas/Action' }
+        resource: { type: string, maxLength: 256, pattern: '^[^\n\r]*$' }
+        context:
+          type: object
+          description: Integer-only JSON (no floats); max 8 KiB canonical; hashed into signedRequest.contextSha256
+        credential: { type: string, maxLength: 8192 }
+        signedRequest: { $ref: '#/components/schemas/SignedRequest' }
+    DecisionReason:
+      type: object
+      required: [code, message]
+      properties:
+        code: { $ref: '#/components/schemas/ReasonCode' }
+        message: { type: string }
+    VerifyResponse:
+      type: object
+      required: [verificationId, decision, reasons, agentId, operatorId, action, grantId, credentialId, evaluatedAt]
+      properties:
+        verificationId: { type: string }
+        decision: { $ref: '#/components/schemas/Decision' }
+        reasons:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/DecisionReason' }
+        agentId: { type: [string, 'null'] }
+        operatorId: { type: [string, 'null'] }
+        action: { type: [string, 'null'] }
+        grantId: { type: [string, 'null'] }
+        credentialId: { type: [string, 'null'] }
+        evaluatedAt: { $ref: '#/components/schemas/IsoDateTime' }
+    VerificationEvent:
+      allOf:
+        - $ref: '#/components/schemas/VerifyResponse'
+        - type: object
+          required: [businessId, requestId]
+          properties:
+            businessId: { type: string }
+            requestId: { type: string }
