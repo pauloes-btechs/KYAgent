@@ -10,6 +10,12 @@ The binding design is in [`ARCHITECTURE.md`](ARCHITECTURE.md) and
 [`docs/contracts/`](docs/contracts/): OpenAPI, types, data schema, error model
 and crypto.
 
+| Document | For |
+|---|---|
+| [`docs/contracts/openapi.yaml`](docs/contracts/openapi.yaml) | OpenAPI 3.1 spec for every endpoint. A running server also serves it at `GET /openapi.yaml`. |
+| [`docs/guides/business-integration.md`](docs/guides/business-integration.md) | Businesses (relying parties): grants, `POST /v1/verify`, reason codes |
+| [`docs/guides/operator-integration.md`](docs/guides/operator-integration.md) | Operators: agent keys, registration, credentials, request signing, revocation |
+
 ## Quick start (about 5 minutes)
 
 You need Node.js 20 or later. There are no dependencies to install.
