@@ -3,10 +3,21 @@ import { signCredential } from '../crypto/credentials.js';
 import { ApiError, validationError } from '../errors.js';
 import { newId } from '../ids.js';
 import { schemas } from '../validate.js';
+import { passportService } from './passports.js';
 import { credentialOut, pageOut } from './serialize.js';
 import { ensureValid, invalidState, notFound, pageQuery } from './util.js';
 
+/** Highest active harness version, or null when none is stored. */
+async function activeHarnessVersion(store) {
+  if (!store.harnessVersions) return null;
+  const active = await store.harnessVersions.find({ status: 'active' });
+  const versions = active.map((h) => h.version).filter(Number.isSafeInteger);
+  return versions.length ? Math.max(...versions) : null;
+}
+
 export function credentialService({ store, clock, config, audit }) {
+  const passports = store.passports ? passportService({ store, clock, audit }) : null;
+
   function visibleTo(principal, cred) {
     if (principal.role === 'admin') return true;
     if (principal.role === 'operator') return cred.operatorId === principal.operatorId;
@@ -64,6 +75,13 @@ export function credentialService({ store, clock, config, audit }) {
         kya_constraints: { ...grant.constraints },
         cnf: { jkt: agent.keyThumbprint },
       };
+      // passport.md §5: additive claims when this delegation has a passport; ignored by /v1/verify.
+      const passport = passports ? await passports.findByAgent(agent.id) : null;
+      if (passport && passport.delegationId === grant.id) {
+        claims.kya_passport = passport.id;
+        claims.kya_delegation_v = passport.delegationVersion;
+        claims.kya_harness_v = (await activeHarnessVersion(store)) ?? passport.harnessVersion;
+      }
       await store.credentials.insert(record);
       // Audit before signing: if the log write fails the JWS is never released and
       // the record is revoked (fail closed).
@@ -82,6 +100,7 @@ export function credentialService({ store, clock, config, audit }) {
         () => store.credentials.revoke(record.id, { revokedAt: clock.now(), statusReason: 'audit log unavailable' }),
       );
       const credential = signCredential(claims, { privateKey: config.signingKey, kid: config.kid });
+      if (claims.kya_passport) await passports.linkCredential(passport.id, record.id);
       return { credential, record: credentialOut(record) };
     },
 
