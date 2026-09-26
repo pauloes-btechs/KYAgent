@@ -756,6 +756,40 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
 
+  /v1/investigations:
+    post:
+      tags: [investigations]
+      operationId: createInvestigation
+      x-roles: [admin, business]
+      x-implemented-by: T08
+      description: |
+        Runs the investigation pipeline (investigation-pipeline.md) for a signed agent action and returns the
+        persisted investigation with `riskDecision` ALLOW/REVIEW/BLOCK. Fail closed: internal failures return 500
+        with a BLOCK/INTERNAL_ERROR investigation body when it could be persisted. The signed request's nonce is
+        consumed exactly as by /v1/verify. `/v1/verify` itself is unchanged. The audience is the calling business;
+        for admin callers it must name an existing business. Until T15, `receiptId` and `receiptHash` are null.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvestigationRequest' }
+      responses:
+        '201':
+          description: Investigation decided and persisted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Investigation' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500':
+          description: Pipeline failed — fail closed (BLOCK / INTERNAL_ERROR)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Investigation' }
+        '503': { $ref: '#/components/responses/Error' }
+
 components:
   securitySchemes:
     apiKey:
@@ -1506,37 +1540,6 @@ components:
 # ---------------------------------------------------------------------------
 x-planned-paths:
   /v1/investigations:
-    post:
-      tags: [investigations]
-      operationId: createInvestigation
-      x-roles: [admin, business]
-      x-implemented-by: T08
-      description: |
-        Runs the investigation pipeline (investigation-pipeline.md) for a signed agent action and returns the
-        persisted investigation with `riskDecision` ALLOW/REVIEW/BLOCK. Fail closed: internal failures return 500
-        with a BLOCK/INTERNAL_ERROR investigation body when it could be persisted. The signed request's nonce is
-        consumed exactly as by /v1/verify. `/v1/verify` itself is unchanged.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/InvestigationRequest' }
-      responses:
-        '201':
-          description: Investigation decided and persisted (with receipt)
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Investigation' }
-        '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-        '429': { $ref: '#/components/responses/Error' }
-        '500':
-          description: Pipeline failed — fail closed (BLOCK / INTERNAL_ERROR)
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Investigation' }
-        '503': { $ref: '#/components/responses/Error' }
     get:
       tags: [investigations]
       operationId: listInvestigations
