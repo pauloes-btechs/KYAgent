@@ -22,6 +22,12 @@ tags:
   - name: credentials
   - name: verification
   - name: audit
+  - name: investigations
+    description: Investigation harness (ARCHITECTURE.md §9). Endpoints are frozen under `x-planned-paths` until implemented.
+  - name: passports
+  - name: harness
+  - name: events
+  - name: demo
 
 paths:
   /healthz:
@@ -1169,3 +1175,610 @@ components:
           properties:
             businessId: { type: string }
             requestId: { type: string }
+
+    # ======================================================================
+    # Investigation harness (T01 contract freeze; ARCHITECTURE.md §9).
+    # Additive: Decision, ReasonCode and VerifyResponse above are unchanged.
+    # Normative companions: decision-vocabulary.md, investigation-pipeline.md,
+    # harness.md, passport.md, receipt.schema.json, mongo-collections.md.
+    # ======================================================================
+    HarnessId:
+      type: string
+      maxLength: 80
+      pattern: '^[a-z]{2,4}_[A-Za-z0-9_-]{1,64}$'
+      description: Harness document id (inv_, rcp_, pp_, mem_, hev_ …); seeded demo ids are fixed strings such as pp_TREASURYBOT.
+    EvmAddress: { type: string, pattern: '^0x[0-9a-f]{40}$', description: Lowercased EVM address }
+    RiskDecision: { type: string, enum: [ALLOW, REVIEW, BLOCK] }
+    RiskReasonCode:
+      type: string
+      enum: [CLEAR, IDENTITY_DENIED, DELEGATION_DENIED, DELEGATION_MAX_EXCEEDED, DAILY_LIMIT_EXCEEDED, WALLET_NOT_APPROVED,
+             ASSET_NOT_PERMITTED, SANCTIONS_EXACT_MATCH, SANCTIONS_FUZZY_MATCH, PASSPORT_SUSPENDED, PASSPORT_REVOKED,
+             PASSPORT_UNDER_REVIEW, PASSPORT_RE_SCREENING, MEMORY_PRECEDENT_TAKEOVER, BEHAVIOR_ESCALATION,
+             HARNESS_INVARIANTS_MISMATCH, INTERNAL_ERROR]
+    InvariantId:
+      type: string
+      enum: [INV_SANCTIONS_EXACT_BLOCK, INV_DELEGATION_MAX, INV_DAILY_LIMIT, INV_NO_SELF_APPROVAL,
+             INV_NO_SELF_PASSPORT_MODIFICATION, INV_UNVERIFIED_MEMORY_NOT_PRECEDENT]
+    Signal: { type: string, enum: [NEW_WALLET, NEW_COUNTERPARTY, SIGNING_KEY_CHANGED, AMOUNT_ANOMALY, VELOCITY, NEAR_CEILING] }
+    Outcome: { type: string, enum: [CLEAN, CONFIRMED_ACCOUNT_TAKEOVER, FALSE_POSITIVE, SANCTIONS_MATCH] }
+    PassportStatus: { type: string, enum: [ACTIVE, REVIEW, RE_SCREENING, SUSPENDED, REVOKED] }
+    InvestigationTrigger: { type: string, enum: [api, sanctions_change, manual] }
+    InvestigationStatus: { type: string, enum: [DECIDED, AWAITING_REVIEW, CONFIRMED] }
+    ActorRef:
+      type: object
+      required: [role, apiKeyId, ownerId]
+      properties:
+        role: { type: string, enum: [admin, operator, business, system] }
+        apiKeyId: { type: [string, 'null'] }
+        ownerId: { type: [string, 'null'] }
+    RiskReason:
+      type: object
+      required: [code, riskDecision, message, stage]
+      properties:
+        code: { $ref: '#/components/schemas/RiskReasonCode' }
+        riskDecision: { $ref: '#/components/schemas/RiskDecision' }
+        message: { type: string }
+        stage: { type: string, pattern: '^[a-z0-9_]{1,64}$' }
+        invariantId: { $ref: '#/components/schemas/InvariantId' }
+        identityReasonCode: { $ref: '#/components/schemas/ReasonCode' }
+        evidenceRefs: { type: array, items: { type: string } }
+    PaymentContext:
+      type: object
+      description: Signed context of an investigated payment (integers only). amount in USDC minor units (6 decimals).
+      required: [amount, currency, counterparty]
+      properties:
+        amount: { type: integer, minimum: 1, maximum: 9007199254740991 }
+        currency: { const: USDC }
+        counterparty: { $ref: '#/components/schemas/EvmAddress' }
+        counterpartyName: { type: string, maxLength: 200 }
+        wallet: { $ref: '#/components/schemas/EvmAddress' }
+    InvestigationRequest:
+      description: >-
+        A VerifyRequest (same signing rules, same nonce store) whose signed `context` is a PaymentContext.
+        The identity + delegation stages run the /v1/verify evaluation; transaction data is taken only from the signed context.
+      allOf:
+        - $ref: '#/components/schemas/VerifyRequest'
+        - type: object
+          required: [context]
+          properties:
+            context: { $ref: '#/components/schemas/PaymentContext' }
+    EvidenceItem:
+      type: object
+      required: [id, kind, source, ref, summary, data]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [identity, delegation, sanctions_exact, sanctions_fuzzy, signal, memory, invariant, policy, passport, step] }
+        source: { type: string }
+        ref: { type: [string, 'null'] }
+        summary: { type: string }
+        data: { type: object }
+    StageResult:
+      type: object
+      required: [name, engine, status, startedAt, durationMs, result, evidence, reasons]
+      properties:
+        name: { type: string, pattern: '^[a-z0-9_]{1,64}$' }
+        engine: { type: string, enum: [code, find, aggregate, $search, $vectorSearch, find+$search, find+code, find+aggregate] }
+        status: { type: string, enum: [passed, failed, flagged, skipped, error] }
+        startedAt: { $ref: '#/components/schemas/IsoDateTime' }
+        durationMs: { type: integer, minimum: 0 }
+        result: { type: object }
+        evidence: { type: array, items: { $ref: '#/components/schemas/EvidenceItem' } }
+        reasons: { type: array, items: { $ref: '#/components/schemas/RiskReason' } }
+    MemoryHit:
+      type: object
+      required: [memoryId, title, status, outcome, score, scorePpm, signals, recommendedSteps, usedAsPrecedent]
+      properties:
+        memoryId: { type: string }
+        title: { type: string }
+        status: { const: VERIFIED }
+        outcome: { $ref: '#/components/schemas/Outcome' }
+        score: { type: number, description: '$meta vectorSearchScore' }
+        scorePpm: { type: integer, minimum: 0, maximum: 1000000 }
+        signals: { type: array, items: { $ref: '#/components/schemas/Signal' } }
+        recommendedSteps: { type: array, items: { type: string } }
+        usedAsPrecedent: { type: boolean }
+    InvestigationTransaction:
+      type: object
+      required: [asset, amount, wallet, counterparty]
+      properties:
+        asset: { const: USDC }
+        amount: { type: [integer, 'null'] }
+        wallet: { $ref: '#/components/schemas/EvmAddress' }
+        counterparty:
+          type: object
+          required: [address, name]
+          properties:
+            address: { $ref: '#/components/schemas/EvmAddress' }
+            name: { type: [string, 'null'] }
+    PassportTransitionRef:
+      type: object
+      required: [id, before, after]
+      properties:
+        id: { type: string }
+        before: { $ref: '#/components/schemas/PassportStatus' }
+        after: { $ref: '#/components/schemas/PassportStatus' }
+    Investigation:
+      type: object
+      required: [id, trigger, status, agentId, principalId, businessId, delegationId, delegationVersion, action, transaction,
+                 harnessVersion, stages, signals, memory, decision, riskDecision, reasons, outcome, passport, receiptId,
+                 receiptHash, requestId, createdAt, decidedAt, confirmedAt]
+      properties:
+        id: { $ref: '#/components/schemas/HarnessId' }
+        trigger: { $ref: '#/components/schemas/InvestigationTrigger' }
+        status: { $ref: '#/components/schemas/InvestigationStatus' }
+        agentId: { type: string }
+        principalId: { type: [string, 'null'], description: '= operatorId' }
+        businessId: { type: [string, 'null'] }
+        delegationId: { type: [string, 'null'], description: '= grantId' }
+        delegationVersion: { type: [integer, 'null'] }
+        action: { type: [string, 'null'] }
+        transaction:
+          oneOf:
+            - $ref: '#/components/schemas/InvestigationTransaction'
+            - type: 'null'
+        harnessVersion: { type: integer, minimum: 1 }
+        stages: { type: array, items: { $ref: '#/components/schemas/StageResult' } }
+        signals: { type: array, items: { $ref: '#/components/schemas/Signal' } }
+        memory:
+          type: object
+          required: [engine, k, minScorePpm, hits]
+          properties:
+            engine: { const: $vectorSearch }
+            k: { type: integer }
+            minScorePpm: { type: integer }
+            hits: { type: array, items: { $ref: '#/components/schemas/MemoryHit' } }
+        decision: { $ref: '#/components/schemas/Decision' }
+        riskDecision: { $ref: '#/components/schemas/RiskDecision' }
+        reasons: { type: array, minItems: 1, items: { $ref: '#/components/schemas/RiskReason' } }
+        outcome:
+          oneOf:
+            - $ref: '#/components/schemas/Outcome'
+            - type: 'null'
+        passport:
+          oneOf:
+            - $ref: '#/components/schemas/PassportTransitionRef'
+            - type: 'null'
+        receiptId: { type: string }
+        receiptHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        requestId: { type: [string, 'null'] }
+        createdAt: { $ref: '#/components/schemas/IsoDateTime' }
+        decidedAt: { $ref: '#/components/schemas/IsoDateTime' }
+        confirmedAt: { type: [string, 'null'], format: date-time }
+    Receipt:
+      type: object
+      description: Normative schema is docs/contracts/receipt.schema.json (kya-receipt-v1).
+      required: [receiptVersion, receiptId, investigationId, riskDecision, receiptHash]
+      properties:
+        receiptVersion: { const: kya-receipt-v1 }
+        receiptId: { type: string }
+        investigationId: { type: string }
+        riskDecision: { $ref: '#/components/schemas/RiskDecision' }
+        receiptHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+    ConfirmInvestigationRequest:
+      type: object
+      additionalProperties: false
+      required: [outcome, approveAdaptation]
+      properties:
+        outcome: { $ref: '#/components/schemas/Outcome' }
+        note: { type: string, maxLength: 1000 }
+        approveAdaptation: { type: boolean, description: Human approval of the proposed harness adaptation (harness.md §6) }
+    JsonPatchOp:
+      type: object
+      required: [op, path]
+      properties:
+        op: { type: string, enum: [add, remove, replace] }
+        path: { type: string }
+        value: {}
+    ConfirmInvestigationResponse:
+      type: object
+      required: [investigation, memory, adaptation]
+      properties:
+        investigation: { $ref: '#/components/schemas/Investigation' }
+        memory:
+          type: object
+          required: [id, status]
+          properties:
+            id: { type: string }
+            status: { type: string, enum: [VERIFIED, REJECTED] }
+        adaptation:
+          type: object
+          required: [proposed, applied, eventId, fromVersion, toVersion, diff]
+          properties:
+            proposed: { type: boolean }
+            applied: { type: boolean }
+            eventId: { type: [string, 'null'] }
+            fromVersion: { type: integer }
+            toVersion: { type: [integer, 'null'] }
+            diff: { type: array, items: { $ref: '#/components/schemas/JsonPatchOp' } }
+    PassportStatusChange:
+      type: object
+      required: [status, at, actor, reason, investigationId]
+      properties:
+        status: { $ref: '#/components/schemas/PassportStatus' }
+        at: { $ref: '#/components/schemas/IsoDateTime' }
+        actor: { $ref: '#/components/schemas/ActorRef' }
+        reason: { type: [string, 'null'] }
+        investigationId: { type: [string, 'null'] }
+    Passport:
+      type: object
+      description: Full view (admin, owning operator). Businesses receive only agentId, principalId, status, harnessVersion, sanctionsDatasetVersion, updatedAt.
+      required: [agentId, principalId, status, harnessVersion, sanctionsDatasetVersion, updatedAt]
+      properties:
+        id: { type: string }
+        agentId: { type: string }
+        principalId: { type: string }
+        delegationId: { type: string }
+        delegationVersion: { type: integer, minimum: 1 }
+        wallet: { $ref: '#/components/schemas/EvmAddress' }
+        status: { $ref: '#/components/schemas/PassportStatus' }
+        statusReason: { type: [string, 'null'] }
+        credentialId: { type: [string, 'null'] }
+        lastInvestigationId: { type: [string, 'null'] }
+        sanctionsDatasetVersion: { type: string }
+        harnessVersion: { type: integer, minimum: 1 }
+        issuedAt: { $ref: '#/components/schemas/IsoDateTime' }
+        expiresAt: { $ref: '#/components/schemas/IsoDateTime' }
+        updatedAt: { $ref: '#/components/schemas/IsoDateTime' }
+        statusHistory: { type: array, items: { $ref: '#/components/schemas/PassportStatusChange' } }
+    PassportTransitionRequest:
+      type: object
+      additionalProperties: false
+      required: [to, reason]
+      properties:
+        to: { $ref: '#/components/schemas/PassportStatus' }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+    HarnessPolicy:
+      type: object
+      description: Adaptive policy only; normative JSON Schema in harness.md §3.1 (additionalProperties false everywhere, no invariant keys).
+      required: [steps, memoryRetrieval, contextAssembly, evidenceRequests, escalation]
+      properties:
+        steps: { type: array, items: { type: string } }
+        memoryRetrieval: { type: object }
+        sanctionsFuzzy: { type: object }
+        contextAssembly: { type: object }
+        evidenceRequests: { type: array, items: { type: object } }
+        escalation: { type: array, items: { type: object } }
+    HarnessVersion:
+      type: object
+      required: [version, status, parentVersion, invariantsHash, policy, policyHash, createdAt, approvedBy, sourceEventId]
+      properties:
+        version: { type: integer, minimum: 1 }
+        status: { type: string, enum: [active, superseded] }
+        parentVersion: { type: [integer, 'null'] }
+        invariantsHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        policy: { $ref: '#/components/schemas/HarnessPolicy' }
+        policyHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        createdAt: { $ref: '#/components/schemas/IsoDateTime' }
+        approvedBy: { $ref: '#/components/schemas/ActorRef' }
+        sourceEventId: { type: [string, 'null'] }
+    HarnessEvent:
+      type: object
+      required: [id, type, fromVersion, toVersion, diff, oldPolicy, newPolicy, invariantsHash, evidence, proposer, approvedBy, approvedAt, at]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [adaptation.applied, adaptation.rejected] }
+        fromVersion: { type: integer }
+        toVersion: { type: [integer, 'null'] }
+        diff: { type: array, items: { $ref: '#/components/schemas/JsonPatchOp' } }
+        oldPolicy: { $ref: '#/components/schemas/HarnessPolicy' }
+        newPolicy:
+          oneOf:
+            - $ref: '#/components/schemas/HarnessPolicy'
+            - type: 'null'
+        oldPolicyHash: { type: string }
+        newPolicyHash: { type: [string, 'null'] }
+        invariantsHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        evidence:
+          type: array
+          items:
+            type: object
+            required: [type, id]
+            properties:
+              type: { type: string, enum: [investigation, memory] }
+              id: { type: string }
+        proposer:
+          type: object
+          required: [kind, llmMode, model]
+          properties:
+            kind: { type: string, enum: [template, llm] }
+            llmMode: { type: string, enum: [fixture, live] }
+            model: { type: [string, 'null'] }
+        approvedBy: { $ref: '#/components/schemas/ActorRef' }
+        approvedAt: { $ref: '#/components/schemas/IsoDateTime' }
+        at: { $ref: '#/components/schemas/IsoDateTime' }
+        auditEventId: { type: string }
+    DemoRunResponse:
+      type: object
+      required: [demo, passed, investigations]
+      properties:
+        demo: { type: integer, minimum: 1, maximum: 5 }
+        passed: { type: boolean }
+        investigations: { type: array, items: { $ref: '#/components/schemas/Investigation' } }
+        notes: { type: array, items: { type: string } }
+
+# ---------------------------------------------------------------------------
+# Frozen investigation-harness endpoints (T01). Same format as `paths`.
+# Each implementing task (T08, T10, T11, T13, T15, T04) MOVES its entry from
+# here into `paths` in the same change that adds the route to src/app.js, so
+# test/docs.test.js ('openapi.yaml documents exactly the implemented
+# endpoints') stays exact. Path parameters are named {id} (docs.test.js maps
+# :id -> {id}). RBAC per ARCHITECTURE.md §9.5.
+# ---------------------------------------------------------------------------
+x-planned-paths:
+  /v1/investigations:
+    post:
+      tags: [investigations]
+      operationId: createInvestigation
+      x-roles: [admin, business]
+      x-implemented-by: T08
+      description: |
+        Runs the investigation pipeline (investigation-pipeline.md) for a signed agent action and returns the
+        persisted investigation with `riskDecision` ALLOW/REVIEW/BLOCK. Fail closed: internal failures return 500
+        with a BLOCK/INTERNAL_ERROR investigation body when it could be persisted. The signed request's nonce is
+        consumed exactly as by /v1/verify. `/v1/verify` itself is unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvestigationRequest' }
+      responses:
+        '201':
+          description: Investigation decided and persisted (with receipt)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Investigation' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500':
+          description: Pipeline failed — fail closed (BLOCK / INTERNAL_ERROR)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Investigation' }
+        '503': { $ref: '#/components/responses/Error' }
+    get:
+      tags: [investigations]
+      operationId: listInvestigations
+      x-roles: [admin, operator(own agents), business(own)]
+      x-implemented-by: T08
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: agentId
+          in: query
+          schema: { type: string, maxLength: 64 }
+        - name: riskDecision
+          in: query
+          schema: { $ref: '#/components/schemas/RiskDecision' }
+        - name: trigger
+          in: query
+          schema: { $ref: '#/components/schemas/InvestigationTrigger' }
+      responses:
+        '200':
+          description: Page of investigations, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Investigation' } }
+                  nextCursor: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /v1/investigations/{id}:
+    get:
+      tags: [investigations]
+      operationId: getInvestigation
+      x-roles: [admin, operator(own agents), business(own)]
+      x-implemented-by: T08
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/HarnessId' }
+      responses:
+        '200':
+          description: Investigation with stages, evidence, memory hits and reasons
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Investigation' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/investigations/{id}/receipt:
+    get:
+      tags: [investigations]
+      operationId: getInvestigationReceipt
+      x-roles: [admin, operator(own agents), business(own)]
+      x-implemented-by: T15
+      description: Compliance receipt (receipt.schema.json) including `receiptHash` and its `receipt.issued` audit anchor.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/HarnessId' }
+      responses:
+        '200':
+          description: Receipt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/investigations/{id}/confirm:
+    post:
+      tags: [investigations]
+      operationId: confirmInvestigation
+      x-roles: [admin]
+      x-implemented-by: T13
+      description: |
+        Human confirmation of an investigation outcome (harness.md §6). Promotes the case memory
+        (UNVERIFIED -> VERIFIED, or -> REJECTED for CLEAN) and, when `approveAdaptation` is true, persists the
+        validated adaptive-policy proposal as a new harness version plus a harness_events entry.
+        INV_NO_SELF_APPROVAL: 403 when the confirming key initiated the investigation or owns its agent,
+        principal or business. 409 INVALID_STATE when already confirmed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/HarnessId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfirmInvestigationRequest' }
+      responses:
+        '200':
+          description: Outcome recorded; memory and harness effects
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfirmInvestigationResponse' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /v1/passports/{id}:
+    get:
+      tags: [passports]
+      operationId: getPassport
+      x-roles: [admin, operator(own), business(public view)]
+      x-implemented-by: T10
+      description: Passport of the agent whose id is `{id}` (an agent id, agt_…). Businesses receive the public view.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Agent id
+          schema: { type: string, maxLength: 64 }
+      responses:
+        '200':
+          description: Passport
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Passport' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/passports/{id}/transitions:
+    post:
+      tags: [passports]
+      operationId: transitionPassport
+      x-roles: [admin]
+      x-implemented-by: T10
+      description: |
+        Admin passport transition (passport.md §3; only transitions whose allowed actor includes admin).
+        INV_NO_SELF_PASSPORT_MODIFICATION: operator and business keys receive 403. Illegal transition => 409 INVALID_STATE.
+        `{id}` is the agent id.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Agent id
+          schema: { type: string, maxLength: 64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PassportTransitionRequest' }
+      responses:
+        '200':
+          description: Updated passport
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Passport' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /v1/harness/versions:
+    get:
+      tags: [harness]
+      operationId: listHarnessVersions
+      x-roles: [admin, business]
+      x-implemented-by: T13
+      description: All harness versions, newest first; exactly one has status `active`.
+      responses:
+        '200':
+          description: Harness versions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, invariantsHash]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/HarnessVersion' } }
+                  invariantsHash: { type: string, pattern: '^[0-9a-f]{64}$', description: Runtime INVARIANTS_HASH }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /v1/harness/events:
+    get:
+      tags: [harness]
+      operationId: listHarnessEvents
+      x-roles: [admin, business]
+      x-implemented-by: T13
+      description: Harness adaptation events (old/new policy, diff, evidence, approval, timestamp), newest first.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Page of harness events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/HarnessEvent' } }
+                  nextCursor: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /v1/events/stream:
+    get:
+      tags: [events]
+      operationId: streamEvents
+      x-roles: [admin]
+      x-implemented-by: T11
+      description: |
+        Server-Sent Events feed (text/event-stream) of `sanctions.change_detected`, `passport.status_changed`,
+        `investigation.decided` and `harness.adapted` (types.ts HarnessStreamEvent). Each SSE `event:` is the type,
+        `data:` the JSON object. Keep-alive comment every 15 s. Not rate-limited per event; one stream per key.
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /v1/demo/{id}/run:
+    post:
+      tags: [demo]
+      operationId: runDemo
+      x-roles: [admin]
+      x-implemented-by: T08
+      description: |
+        Development only (NODE_ENV != production; 404 otherwise). Runs demo `{id}` (1..5, DELIVERY_PLAN §1) against
+        the Atlas-backed store with trigger `manual` and returns the produced investigations. Never substitutes
+        an in-memory store.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, enum: ['1', '2', '3', '4', '5'] }
+      responses:
+        '200':
+          description: Demo run result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DemoRunResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
