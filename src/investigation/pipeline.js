@@ -40,7 +40,9 @@ const MESSAGES = {
 const reason = (code, riskDecision, stage, extra = {}) => ({ code, riskDecision, message: MESSAGES[code] ?? code, stage, ...extra });
 const idOf = (d) => d?.id ?? d?._id ?? null;
 
-function identityStage({ agent, operator, agentId }) {
+// `signed` (trigger `api`): the /v1/verify steps 1–8 outcome computed by the investigations
+// service `{ reasonCode, signature, nonce }`; its reasonCode is authoritative (same check order).
+function identityStage({ agent, operator, agentId, signed = null }) {
   let reasonCode = 'ALLOWED';
   if (!agent) reasonCode = 'AGENT_NOT_FOUND';
   else if (agent.status === 'revoked') reasonCode = 'AGENT_REVOKED';
@@ -48,11 +50,12 @@ function identityStage({ agent, operator, agentId }) {
   else if (!operator) reasonCode = 'OPERATOR_NOT_VERIFIED';
   else if (operator.status === 'suspended') reasonCode = 'OPERATOR_SUSPENDED';
   else if (operator.status !== 'verified') reasonCode = 'OPERATOR_NOT_VERIFIED';
+  if (signed) reasonCode = signed.reasonCode;
   const decision = reasonCode === 'ALLOWED' ? 'ALLOW' : 'DENY';
   return {
     status: decision === 'ALLOW' ? 'passed' : 'failed',
     result: {
-      mode: 'state',
+      mode: signed ? 'signed' : 'state',
       decision,
       reasonCode,
       agentId,
@@ -66,7 +69,12 @@ function identityStage({ agent, operator, agentId }) {
         source: 'agents',
         ref: agent ? agentId : null,
         summary: `agent ${agent?.status ?? 'missing'}, operator ${operator?.status ?? 'missing'}`,
-        data: { agentStatus: agent?.status ?? null, operatorStatus: operator?.status ?? null, signature: 'not_applicable', nonce: 'not_applicable' },
+        data: {
+          agentStatus: agent?.status ?? null,
+          operatorStatus: operator?.status ?? null,
+          signature: signed?.signature ?? 'not_applicable',
+          nonce: signed?.nonce ?? 'not_applicable',
+        },
       },
     ],
     reasons: decision === 'ALLOW' ? [] : [reason('IDENTITY_DENIED', 'BLOCK', 'identity', { identityReasonCode: reasonCode })],
@@ -138,7 +146,16 @@ function decide(reasons) {
  * `delegationId` selects the grant (defaults to `tx.delegationId`).
  * Returns `{ agentId, trigger, stages[], signals, memory, riskDecision, decision, reasons, evidence[] }`.
  */
-export async function runInvestigation({ store, agentId, tx, delegationId = tx?.delegationId, policy = DEFAULT_POLICY, trigger = 'manual', now = new Date() }) {
+export async function runInvestigation({
+  store,
+  agentId,
+  tx,
+  delegationId = tx?.delegationId,
+  policy = DEFAULT_POLICY,
+  trigger = 'manual',
+  now = new Date(),
+  signedIdentity = null,
+}) {
   const stages = [];
   const ctx = { signals: [], memory: null, halted: false };
 
@@ -173,7 +190,7 @@ export async function runInvestigation({ store, agentId, tx, delegationId = tx?.
   const id = await run('identity', 'code', async () => {
     agent = await store.agents.findById(agentId);
     const operator = agent ? await store.operators.findById(agent.operatorId) : null;
-    return identityStage({ agent, operator, agentId });
+    return identityStage({ agent, operator, agentId, signed: signedIdentity });
   });
   if (id && id.result.decision === 'DENY') ctx.halted = true;
 
