@@ -88,3 +88,17 @@ export const eventOut = (e) => ({
 });
 
 export const pageOut = (page, fn) => ({ data: page.data.map(fn), nextCursor: page.nextCursor });
+
+export const auditEventOut = (e) => ({
+  id: e.id,
+  seq: e.seq,
+  type: e.type,
+  occurredAt: iso(e.occurredAt),
+  actor: { role: e.actor.role, apiKeyId: e.actor.apiKeyId ?? null, ownerId: e.actor.ownerId ?? null },
+  subjectType: e.subjectType,
+  subjectId: e.subjectId,
+  requestId: e.requestId ?? null,
+  data: structuredClone(e.data ?? {}),
+  prevHash: e.prevHash,
+  hash: e.hash,
+});

@@ -6,7 +6,7 @@ import { schemas } from '../validate.js';
 import { credentialOut, pageOut } from './serialize.js';
 import { ensureValid, invalidState, notFound, pageQuery } from './util.js';
 
-export function credentialService({ store, clock, config }) {
+export function credentialService({ store, clock, config, audit }) {
   function visibleTo(principal, cred) {
     if (principal.role === 'admin') return true;
     if (principal.role === 'operator') return cred.operatorId === principal.operatorId;
@@ -65,6 +65,22 @@ export function credentialService({ store, clock, config }) {
         cnf: { jkt: agent.keyThumbprint },
       };
       await store.credentials.insert(record);
+      // Audit before signing: if the log write fails the JWS is never released and
+      // the record is revoked (fail closed).
+      await audit.recordOrCompensate(
+        principal,
+        'credential.issued',
+        { type: 'credential', id: record.id },
+        {
+          agentId: record.agentId,
+          operatorId: record.operatorId,
+          businessId: record.businessId,
+          grantId: record.grantId,
+          actions: record.actions,
+          expiresAt: record.expiresAt,
+        },
+        () => store.credentials.revoke(record.id, { revokedAt: clock.now(), statusReason: 'audit log unavailable' }),
+      );
       const credential = signCredential(claims, { privateKey: config.signingKey, kid: config.kid });
       return { credential, record: credentialOut(record) };
     },
@@ -88,6 +104,12 @@ export function credentialService({ store, clock, config }) {
       if (!cred || !visibleTo(principal, cred)) throw notFound();
       const updated = await store.credentials.revoke(id, { revokedAt: clock.now(), statusReason: body.reason });
       if (!updated) throw invalidState('Credential is already revoked');
+      await audit.record(principal, 'credential.revoked', { type: 'credential', id }, {
+        agentId: updated.agentId,
+        businessId: updated.businessId,
+        grantId: updated.grantId,
+        reason: body.reason,
+      });
       return credentialOut(updated);
     },
   };

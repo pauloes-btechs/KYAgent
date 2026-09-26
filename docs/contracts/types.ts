@@ -19,6 +19,7 @@ export const ID_PREFIX = {
   credential: 'crd',
   apiKey: 'key',
   verification: 'vrf',
+  auditEvent: 'aud',
 } as const;
 
 export type OperatorId = string; // op_...
@@ -373,6 +374,45 @@ export interface VerifyResponse {
 export interface VerificationEvent extends VerifyResponse {
   businessId: BusinessId;
   requestId: string;
+}
+
+// ---------------------------------------------------------------------------
+// Audit log (REQ-008) — append-only, hash-chained
+// ---------------------------------------------------------------------------
+
+export type AuditEventType =
+  | 'operator.created'
+  | 'operator.verification_completed'
+  | 'operator.suspended'
+  | 'business.created'
+  | 'api_key.created'
+  | 'api_key.revoked'
+  | 'agent.registered'
+  | 'agent.suspended'
+  | 'agent.reactivated'
+  | 'agent.revoked'
+  | 'grant.created'
+  | 'grant.revoked'
+  | 'credential.issued'
+  | 'credential.revoked'
+  | 'verification.decided';
+
+export interface AuditEvent {
+  id: string; // aud_...
+  /** Contiguous from 1; unique. */
+  seq: number;
+  type: AuditEventType;
+  occurredAt: IsoDateTime;
+  actor: { role: Role | 'system'; apiKeyId: string | null; ownerId: string | null };
+  subjectType: 'operator' | 'business' | 'api_key' | 'agent' | 'grant' | 'credential' | 'verification';
+  subjectId: string;
+  requestId: string | null;
+  /** Ids and non-secret metadata only. */
+  data: Record<string, unknown>;
+  /** Hash of the previous event (64 zeros for seq 1). */
+  prevHash: string;
+  /** SHA-256 hex of canonical JSON of all fields above except `hash`. */
+  hash: string;
 }
 
 // ---------------------------------------------------------------------------

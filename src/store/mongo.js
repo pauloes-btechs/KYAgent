@@ -88,6 +88,10 @@ export class MongoStore {
       c('nonces').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
       c('verification_events').createIndex({ businessId: 1, evaluatedAt: -1 }),
       c('verification_events').createIndex({ agentId: 1, evaluatedAt: -1 }),
+      c('audit_events').createIndex({ seq: 1 }, { unique: true }),
+      c('audit_events').createIndex({ occurredAt: -1, _id: -1 }),
+      c('audit_events').createIndex({ subjectId: 1, occurredAt: -1 }),
+      c('audit_events').createIndex({ type: 1, occurredAt: -1 }),
     ]);
 
     const apiKeys = repo(c('api_keys'));
@@ -134,6 +138,17 @@ export class MongoStore {
       },
     };
     this.verificationEvents = repo(c('verification_events'), 'evaluatedAt');
+    // Append-only: only insert and reads are exposed. Duplicate `seq` (a concurrent
+    // writer extended the chain first) surfaces as ConflictError and is retried.
+    const auditCol = c('audit_events');
+    const audit = repo(auditCol, 'occurredAt');
+    this.auditEvents = {
+      append: audit.insert,
+      last: async () => fromDoc(await auditCol.find({}).sort({ seq: -1 }).limit(1).next()),
+      range: async (fromSeq, limit) =>
+        (await auditCol.find({ seq: { $gte: fromSeq } }).sort({ seq: 1 }).limit(limit).toArray()).map(fromDoc),
+      list: audit.list,
+    };
   }
 
   async ping() {
