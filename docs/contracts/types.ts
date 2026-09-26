@@ -166,6 +166,32 @@ export interface Agent {
   revokedAt: IsoDateTime | null;
 }
 
+/** REQ-019: advisory, rule-based trust score (GET /v1/agents/{id}/trust-score). */
+export type TrustLevel = 'high' | 'medium' | 'low' | 'untrusted';
+
+export interface TrustFactor {
+  code: 'operator_verification' | 'agent_age' | 'revocation_history' | 'scope_breadth';
+  label: string;
+  points: number;
+  maxPoints: number;
+  detail: string;
+  inputs: Record<string, unknown>;
+}
+
+export interface TrustScore {
+  agentId: AgentId;
+  operatorId: OperatorId;
+  rulesVersion: 'kya-trust-v1';
+  score: number;
+  maxScore: 100;
+  level: TrustLevel;
+  /** Hard-gate failures (agent not active / operator not verified); non-empty => score 0. */
+  gates: string[];
+  factors: TrustFactor[];
+  computedAt: IsoDateTime;
+  advisory: string;
+}
+
 export interface CreateAgentRequest {
   name: string;
   description?: string;

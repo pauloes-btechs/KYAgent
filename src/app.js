@@ -16,6 +16,7 @@ import { AUDIT_EVENT_TYPES, auditService } from './services/audit.js';
 import { credentialService } from './services/credentials.js';
 import { grantService } from './services/grants.js';
 import { businessService, operatorService } from './services/operators.js';
+import { trustService } from './services/trust.js';
 import { verificationService } from './services/verification.js';
 import { decodeCursor } from './store/pagination.js';
 
@@ -146,6 +147,7 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
     grants: grantService(deps),
     credentials: credentialService(deps),
     verification: verificationService(deps),
+    trust: trustService(deps),
   };
   const s = services;
   const dashboard = loadDashboard();
@@ -174,6 +176,7 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
     { m: 'POST', p: '/v1/agents/:id/suspend', roles: ['admin', 'operator'], body: 'json', h: (c) => s.agents.suspend(c.principal, c.id, c.body) },
     { m: 'POST', p: '/v1/agents/:id/reactivate', roles: ['admin', 'operator'], h: (c) => s.agents.reactivate(c.principal, c.id) },
     { m: 'POST', p: '/v1/agents/:id/revoke', roles: ['admin', 'operator'], body: 'json', h: (c) => s.agents.revoke(c.principal, c.id, c.body) },
+    { m: 'GET', p: '/v1/agents/:id/trust-score', roles: ALL, h: (c) => s.trust.score(c.principal, c.id) },
     { m: 'POST', p: '/v1/agents/:id/credentials', roles: ['operator'], body: 'json', status: 201, noStore: true, h: (c) => s.credentials.issue(c.principal, c.id, c.body) },
 
     { m: 'POST', p: '/v1/grants', roles: ['business'], body: 'json', status: 201, h: (c) => s.grants.create(c.principal, c.body) },
