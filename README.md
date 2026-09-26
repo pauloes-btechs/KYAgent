@@ -53,9 +53,24 @@ set -a; . ./.env; set +a; npm start
 
 - If `MONGODB_URI` is unset, the server uses the in-memory store. This is for dev
   and test only: data is lost on restart and the dashboard shows a warning chip.
-- To use MongoDB, run `npm install mongodb` and set `MONGODB_URI`. With Docker,
-  `docker compose up --build` runs the API and MongoDB with `NODE_ENV=production`
-  and reads secrets from `.env`.
+- To use MongoDB, run `npm install mongodb` and set `MONGODB_URI`. Schema
+  migrations (`src/store/migrations.js`, recorded in `schema_migrations`) run on
+  startup; `npm run migrate` applies them explicitly and `npm run seed` loads demo data.
+
+### Docker Compose (local deployment)
+
+```bash
+npm run env:init                               # writes .env (git-ignored, mode 0600) with generated secrets
+docker compose up --build -d                   # mongo -> migrate (one-shot) -> api on 127.0.0.1:8080
+docker compose --profile seed run --rm seed    # optional: demo operator, business, agent, grant
+docker compose down                            # add -v to wipe the database volume
+```
+
+The stack runs with `NODE_ENV=production` (secrets required, no in-memory store).
+`api` starts only after `migrate` exits successfully. The seed is idempotent and
+prints the demo operator/business API keys and the agent private-key seed **once**;
+the database stores only hashes and the public key. Your admin key is
+`KYA_BOOTSTRAP_ADMIN_API_KEY` in `.env`. MongoDB is not published on the host.
 - In `production`, a missing signing key, pepper or `MONGODB_URI` makes the
   server refuse to start. In dev/test the server generates ephemeral secrets
   and logs a warning. Configuration reference:
