@@ -164,3 +164,9 @@ would only replace the adapter.
 Non-goals, as in the brief: no real KYC provider (mocked), no blockchain
 registry (`CHAIN_MODE` is ignored), no LLM features (`LLM_MODE` is ignored),
 no billing and no bot detection.
+
+## For judges and non-engineers
+
+- **City Gate explainer** — an interactive, kid-friendly walkthrough of how KYAgent decides which agents get in and how the harness learns. Open `docs/explainer/index.html` in any browser.
+- **Pitch deck** — `docs/KYAgent_pitch.pptx`.
+- **MongoDB hackathon work in progress** — branch `run/run_330acfe48e598a1f` (Atlas Search, Vector Search, Change Streams, versioned harness). See `MONGODB_HACKATHON_GAP_ANALYSIS.md` and `DELIVERY_PLAN.md` on that branch.
