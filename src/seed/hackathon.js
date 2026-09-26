@@ -480,6 +480,49 @@ export async function seedHackathon(db, { now = new Date(), docs = buildHackatho
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
+ * Demo 3 (REQ-P0-3): a payment that resembles the VERIFIED takeover mem_INV-1042 without being
+ * identical — rotated signing key, never-seen counterparty, amount above p95 but below the 90 %
+ * ceiling (so NEAR_CEILING does not fire). Expected: REVIEW / MEMORY_PRECEDENT_TAKEOVER.
+ */
+export const DEMO3_CASE = Object.freeze({
+  action: 'payments:create',
+  context: Object.freeze({
+    amount: 21_000 * USDC,
+    currency: 'USDC',
+    counterparty: '0x7a11000000000000000000000000000000c0ffee',
+    counterpartyName: 'Unfamiliar OTC desk',
+  }),
+  expectedSignals: Object.freeze(['AMOUNT_ANOMALY', 'NEW_COUNTERPARTY', 'SIGNING_KEY_CHANGED']),
+  expected: Object.freeze({ riskDecision: 'REVIEW', reasonCode: 'MEMORY_PRECEDENT_TAKEOVER', memoryId: 'mem_INV-1042' }),
+});
+
+/**
+ * The takeover precondition of Demo 3: TreasuryBot's registered signing key is replaced by the
+ * `rotated` key (2 h before `now`), recorded in `signingKeyHistory`. Idempotent; undone by reset.
+ */
+export async function rotateTreasuryBotKey(db, { now = new Date() } = {}) {
+  const rotated = treasuryBotKey('rotated');
+  const agents = db.collection('agents');
+  const agent = await agents.findOne({ _id: DEMO_IDS.agent });
+  if (!agent) throw new Error(`${DEMO_IDS.agent} is not seeded (run make demo-reset)`);
+  if (agent.keyThumbprint === rotated.thumbprint) return { rotated: false, thumbprint: rotated.thumbprint };
+  const rotatedAt = new Date(now.getTime() - 2 * HOUR);
+  const history = (agent.signingKeyHistory ?? []).map((h) => (h.to ? h : { ...h, to: rotatedAt }));
+  await agents.updateOne(
+    { _id: DEMO_IDS.agent },
+    {
+      $set: {
+        publicKey: rotated.publicKey,
+        keyThumbprint: rotated.thumbprint,
+        signingKeyHistory: [...history, { thumbprint: rotated.thumbprint, from: rotatedAt, to: null }],
+        updatedAt: now,
+      },
+    },
+  );
+  return { rotated: true, thumbprint: rotated.thumbprint };
+}
+
+/**
  * Prove both Atlas indexes answer real queries over the seeded data: `$search` finds the
  * Lazarus entity by name, and `$vectorSearch` (filter VERIFIED) ranks mem_INV-1042 first and
  * never returns the UNVERIFIED look-alike. Returns `{ search, vector }` evidence.
