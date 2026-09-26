@@ -163,5 +163,7 @@ Useful reads: `GET /v1/agents?status=active`, `GET /v1/agents/{id}`,
 
 ## 7. Try it locally
 
-`npm run demo` runs the full flow in memory and prints demo-only operator,
-business and admin keys for the dashboard at `/dashboard/`.
+`npm run example:sdk` runs the signing and verification flow in memory.
+`make demo-reset && make demo` (MongoDB Atlas required, `MONGODB_URI`) serves the
+hackathon scenario and prints demo-only operator, business and admin keys for the
+dashboard at `/dashboard/`.

@@ -214,7 +214,8 @@ A `DENY` carries the first check that failed, in this order:
 
 ## 6. Try it locally
 
-`npm run demo` starts the API in memory and runs this whole flow, including
-denials for an over-limit amount, a replayed request and revoked
-credentials and agents. With a business key, the dashboard at `/dashboard/`
-shows your grants, credentials and the **Verifications** audit log.
+`npm run example:sdk` starts the API in memory and runs a signed-request flow
+end to end. `make demo-reset && make demo` (MongoDB Atlas required,
+`MONGODB_URI`) serves the hackathon scenario. With its business key, the
+dashboard at `/dashboard/` shows your grants, credentials and the
+**Verifications** audit log.
