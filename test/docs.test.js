@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { REASON_CODES } from '../src/contracts.js';
 import * as sdk from '../src/sdk/agentSigner.js';
+import * as businessVerifier from '../src/sdk/businessVerifier.js';
 import { startApp } from './helpers.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -77,9 +78,11 @@ test('business guide lists every verification reason code', () => {
 });
 
 test('SDK functions named in the docs exist', () => {
+  const modules = { agentSigner: sdk, businessVerifier };
   for (const doc of DOCS) {
-    for (const [, names] of read(doc).matchAll(/import \{([^}]+)\} from '\.\/src\/sdk\/agentSigner\.js'/g)) {
-      for (const name of names.split(',').map((s) => s.trim())) assert.equal(typeof sdk[name], 'function', `${doc}: ${name}`);
+    for (const [, names, mod] of read(doc).matchAll(/import \{([^}]+)\} from '\.\/src\/sdk\/(\w+)\.js'/g)) {
+      assert.ok(modules[mod], `${doc}: unknown SDK module ${mod}`);
+      for (const name of names.split(',').map((s) => s.trim())) assert.equal(typeof modules[mod][name], 'function', `${doc}: ${name}`);
     }
   }
 });
