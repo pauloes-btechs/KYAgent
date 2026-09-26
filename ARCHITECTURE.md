@@ -153,7 +153,7 @@ owns grant; credential audience/agent owner). `—` = `403 FORBIDDEN`.
 | `POST /v1/agents` | — | ✔ (self as operator; must be `verified`) | — |
 | `GET /v1/agents` | ✔ | own | — |
 | `GET /v1/agents/{id}` | ✔ | own | ✔ (public profile) |
-| `POST /v1/agents/{id}/revoke` | ✔ | own | — |
+| `POST /v1/agents/{id}/revoke`, `/suspend`, `/reactivate` | ✔ | own | — |
 | `POST /v1/agents/{id}/credentials` | — | own | — |
 | `GET /v1/credentials`, `GET /v1/credentials/{id}` | ✔ | own (agent owner) | own (audience) |
 | `POST /v1/credentials/{id}/revoke` | ✔ | own (agent owner) | own (audience) |
