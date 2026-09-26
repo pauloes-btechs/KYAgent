@@ -1,9 +1,9 @@
 FROM node:20-alpine
 ENV NODE_ENV=production
 WORKDIR /app
-COPY package.json ./
-# The API has zero runtime dependencies; the MongoDB driver is only needed for MongoStore.
-RUN npm install --omit=dev --no-save --no-audit --no-fund mongodb@6
+COPY package.json package-lock.json ./
+# Reproducible install of the declared runtime dependencies (the MongoDB driver) from the lockfile.
+RUN npm ci --omit=dev --no-audit --no-fund
 COPY src ./src
 # migrate.js / seed.js are run by the one-shot compose services.
 COPY scripts ./scripts
