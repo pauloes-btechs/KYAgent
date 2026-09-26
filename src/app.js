@@ -22,6 +22,7 @@ export const systemClock = { now: () => new Date() };
 
 const REQUEST_ID_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 const DASHBOARD_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'dashboard');
+const OPENAPI_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'contracts', 'openapi.yaml');
 const DASHBOARD_FILES = {
   'index.html': 'text/html; charset=utf-8',
   'app.js': 'text/javascript; charset=utf-8',
@@ -51,6 +52,14 @@ function loadDashboard() {
     }
   }
   return files;
+}
+
+function loadOpenApi() {
+  try {
+    return readFileSync(OPENAPI_PATH);
+  } catch {
+    return null; // spec is optional for the API
+  }
 }
 
 function readBody(req, limit) {
@@ -138,6 +147,7 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
   };
   const s = services;
   const dashboard = loadDashboard();
+  const openapiSpec = loadOpenApi();
 
   // body: 'json' = required JSON object body, 'none' = body ignored, 'verify' = decision semantics
   const routes = [
@@ -258,6 +268,17 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
         return send(res, 200, jwks({ publicKey: config.signingPublicKey, kid: config.kid }), requestId, {
           'Cache-Control': 'public, max-age=300',
         });
+      }
+      if (req.method === 'GET' && pathname === '/openapi.yaml') {
+        if (!openapiSpec) throw new ApiError('NOT_FOUND');
+        res.writeHead(200, {
+          'Content-Type': 'application/yaml; charset=utf-8',
+          'Content-Length': openapiSpec.length,
+          'X-Content-Type-Options': 'nosniff',
+          'Cache-Control': 'public, max-age=300',
+          'X-Request-Id': requestId,
+        });
+        return res.end(openapiSpec);
       }
       if (req.method === 'GET' && pathname === '/') {
         res.writeHead(302, { Location: '/dashboard/', 'X-Request-Id': requestId });

@@ -50,6 +50,19 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Jwks' }
 
+  /openapi.yaml:
+    get:
+      tags: [system]
+      security: []
+      operationId: openapi
+      description: This OpenAPI document, served verbatim from docs/contracts/openapi.yaml.
+      responses:
+        '200':
+          description: OpenAPI 3.1 document
+          content:
+            application/yaml:
+              schema: { type: string }
+
   # ------------------------------------------------------------------ businesses
   /v1/businesses:
     post:
