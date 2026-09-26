@@ -10,6 +10,7 @@ const DEFAULT_MESSAGES = {
   OPERATOR_NOT_VERIFIED: 'Operator is not verified',
   PAYLOAD_TOO_LARGE: 'Request body is too large',
   UNSUPPORTED_MEDIA_TYPE: 'Content-Type must be application/json',
+  RATE_LIMITED: 'Too many requests; retry later',
   INTERNAL_ERROR: 'Internal error',
   SERVICE_UNAVAILABLE: 'Service unavailable',
 };
