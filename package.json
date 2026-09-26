@@ -13,6 +13,7 @@
     "start": "node src/server.js",
     "dev": "node src/server.js",
     "demo": "node scripts/demo.js",
+    "example:sdk": "node examples/sdk-quickstart.js",
     "test": "node --test",
     "gen:signing-key": "node scripts/gen-signing-key.js",
     "gen:pepper": "node scripts/gen-pepper.js",

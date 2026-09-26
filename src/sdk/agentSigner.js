@@ -4,7 +4,7 @@
 //   const { privateKey, publicKey } = generateAgentKey();
 //   const pop = proofOfPossession(privateKey, operatorId, publicKey);
 //   const signedRequest = signRequest(privateKey, { agentId, audience, action, resource, context });
-import { randomBytes } from 'node:crypto';
+import { createPrivateKey, randomBytes } from 'node:crypto';
 import { SIG_VERSION } from '../contracts.js';
 import { buildRegisterMessage, buildSigningString, contextSha256 } from '../crypto/canonical.js';
 import { generateEd25519, privateKeyFromSeed, publicKeyB64u, signMessage } from '../crypto/ed25519.js';
@@ -46,4 +46,45 @@ export function buildVerifyRequest(privateKey, { agentId, audience, action, reso
   if (credential !== undefined) body.credential = credential;
   body.signedRequest = signRequest(privateKey, { agentId, audience, action, resource: resource ?? '', context: context ?? {}, timestamp, nonce });
   return body;
+}
+
+// ---------------------------------------------------------------- HTTP transport
+// Agents send their signature to a business as HTTP headers. The business then
+// derives action/resource/context from what it is about to do, and
+// businessVerifier.js checks that the agent signed exactly those values.
+export const KYA_HEADERS = Object.freeze({ signedRequest: 'kya-signed-request', credential: 'kya-credential' });
+
+/** Headers carrying a KYA-SIG-V1 signature (base64url JSON) and optional credential JWS. */
+export function signedHeaders(privateKey, { agentId, audience, action, resource = '', context = {}, credential, timestamp, nonce }) {
+  const signedRequest = signRequest(privateKey, { agentId, audience, action, resource, context, timestamp, nonce });
+  const headers = { [KYA_HEADERS.signedRequest]: Buffer.from(JSON.stringify(signedRequest), 'utf8').toString('base64url') };
+  if (credential !== undefined) headers[KYA_HEADERS.credential] = credential;
+  return headers;
+}
+
+// ---------------------------------------------------------------- key storage
+// Private keys must never be stored in plaintext: export only as encrypted PKCS#8.
+const MIN_PASSPHRASE_LENGTH = 12;
+
+function checkPassphrase(passphrase) {
+  if (typeof passphrase !== 'string' || passphrase.length < MIN_PASSPHRASE_LENGTH) {
+    throw new Error(`passphrase must be a string of at least ${MIN_PASSPHRASE_LENGTH} characters`);
+  }
+}
+
+/** Encrypted PKCS#8 PEM (AES-256-CBC) for storing the agent key at rest. */
+export function exportAgentKey(privateKey, passphrase) {
+  checkPassphrase(passphrase);
+  return privateKey.export({ type: 'pkcs8', format: 'pem', cipher: 'aes-256-cbc', passphrase });
+}
+
+/** Load a key written by exportAgentKey. Unencrypted PEMs are rejected. */
+export function importAgentKey(pem, passphrase) {
+  checkPassphrase(passphrase);
+  if (typeof pem !== 'string' || !pem.includes('-----BEGIN ENCRYPTED PRIVATE KEY-----')) {
+    throw new Error('agent key must be an encrypted PKCS#8 PEM');
+  }
+  const privateKey = createPrivateKey({ key: pem, format: 'pem', passphrase });
+  if (privateKey.asymmetricKeyType !== 'ed25519') throw new Error('agent key must be Ed25519');
+  return { privateKey, publicKey: publicKeyB64u(privateKey) };
 }
