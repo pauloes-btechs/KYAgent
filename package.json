@@ -15,6 +15,7 @@
     "demo": "node scripts/demo.js",
     "example:sdk": "node examples/sdk-quickstart.js",
     "test": "node --test",
+    "test:atlas": "node --test test/atlas/",
     "gen:signing-key": "node scripts/gen-signing-key.js",
     "gen:pepper": "node scripts/gen-pepper.js",
     "gen:admin-key": "node scripts/gen-admin-key.js",
