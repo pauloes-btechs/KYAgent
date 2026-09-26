@@ -23,7 +23,8 @@ function check(s, v, path, errors) {
         if (!Object.prototype.hasOwnProperty.call(v, key)) errors.push({ path: `${path}/${key}`, message: 'is required' });
       }
       for (const [key, val] of Object.entries(v)) {
-        const sub = s.properties?.[key];
+        // own-property lookup: keys like "__proto__" / "constructor" must not resolve to inherited members
+        const sub = s.properties && Object.hasOwn(s.properties, key) ? s.properties[key] : undefined;
         if (!sub) {
           if (s.additionalProperties === false) errors.push({ path: `${path}/${key}`, message: 'is not allowed' });
           continue;
