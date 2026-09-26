@@ -118,6 +118,24 @@ and signs the `KYA-SIG-V1` string:
 KYA-SIG-V1\n{agentId}\n{audience}\n{action}\n{resource}\n{sha256hex(canonicalJson(context))}\n{timestamp}\n{nonce}
 ```
 
+To call a business over HTTP, send the signature as headers instead. The
+business derives `action`/`resource`/`context` from your request and verifies
+them with `src/sdk/businessVerifier.js`:
+
+```js
+import { signedHeaders, exportAgentKey, importAgentKey } from './src/sdk/agentSigner.js';
+
+const headers = signedHeaders(privateKey, { agentId, audience: businessId, action: 'payments:create', context: { amount: 1500, currency: 'USD' }, credential });
+await fetch(`${businessUrl}/payments`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ amount: 1500, currency: 'USD' }) });
+
+// Store the agent key at rest only encrypted (passphrase from your secret manager, >= 12 chars):
+const pem = exportAgentKey(privateKey, process.env.AGENT_KEY_PASSPHRASE);
+const { privateKey: loaded } = importAgentKey(pem, process.env.AGENT_KEY_PASSPHRASE);
+```
+
+`importAgentKey` rejects unencrypted PEMs. See
+[`examples/sdk-quickstart.js`](../../examples/sdk-quickstart.js) for a runnable agent + business pair.
+
 If you are not using Node.js, follow
 [`crypto-and-signing.md`](../contracts/crypto-and-signing.md) §3 and check your
 implementation against the test vector in

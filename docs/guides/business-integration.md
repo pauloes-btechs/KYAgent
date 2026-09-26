@@ -126,6 +126,38 @@ Rules for your integration:
 5. `context` may contain only integers (no floats), strings, booleans, null,
    objects and arrays, up to 8 KiB in canonical form.
 
+### Using the Node.js SDK
+
+[`src/sdk/businessVerifier.js`](../../src/sdk/businessVerifier.js) wraps
+`POST /v1/verify` and fails closed. Network errors, timeouts, `401`/`403`,
+unparseable bodies and any `ALLOW` that does not match the requested agent and
+action all become a local `DENY` with `INTERNAL_ERROR` (`local: true`).
+`baseUrl` must use `https` (plain `http` is accepted only for loopback), and
+the API key is kept inside the verifier and never returned.
+
+Agents send their signature as HTTP headers built with `signedHeaders` from
+the agent SDK: `KYA-Signed-Request` (base64url JSON `SignedRequest`) and an
+optional `KYA-Credential`. Your server derives `action`, `resource` and
+`context` from the operation it is about to perform, so a request whose body
+differs from what the agent signed is denied:
+
+```js
+import { createVerifier, isAllowed } from './src/sdk/businessVerifier.js';
+
+const kya = createVerifier({ baseUrl: process.env.KYA_BASE_URL, apiKey: process.env.KYA_API_KEY });
+
+const decision = await kya.verifyIncoming({
+  headers: req.headers,                 // Node req.headers or a Fetch Headers object
+  action: 'payments:create',
+  context: { amount: body.amount, currency: body.currency },
+});
+if (!isAllowed(decision)) return res.writeHead(403).end(decision.reasons[0].code);
+```
+
+`kya.verify(body)` forwards a complete `VerifyRequest` body instead. A runnable
+end-to-end example (agent client, business server, KYAgent in-process) is in
+[`examples/sdk-quickstart.js`](../../examples/sdk-quickstart.js): `npm run example:sdk`.
+
 HTTP status codes of `/v1/verify`:
 
 | Status | Meaning |
