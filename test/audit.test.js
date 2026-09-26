@@ -2,7 +2,8 @@
 // verification and revocation events.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { AUDIT_EVENT_TYPES, GENESIS_HASH, auditHash } from '../src/services/audit.js';
+import { AUDIT_EVENT_TYPES, GENESIS_HASH, auditHash, auditService } from '../src/services/audit.js';
+import { MemoryStore } from '../src/store/memory.js';
 import { world } from './helpers.js';
 
 const listAll = async (w, query = '') => {
@@ -191,4 +192,17 @@ test('event types are a closed set', () => {
   assert.ok(AUDIT_EVENT_TYPES.includes('credential.issued'));
   assert.ok(AUDIT_EVENT_TYPES.includes('verification.decided'));
   assert.ok(AUDIT_EVENT_TYPES.includes('agent.revoked'));
+  assert.ok(AUDIT_EVENT_TYPES.includes('passport.issued'));
+  assert.ok(AUDIT_EVENT_TYPES.includes('passport.status_changed'));
+  assert.ok(Object.isFrozen(AUDIT_EVENT_TYPES));
+  assert.equal(new Set(AUDIT_EVENT_TYPES).size, AUDIT_EVENT_TYPES.length);
+  // Every passport.* type is one of the contract's harness audit types (types.ts HARNESS_AUDIT_EVENT_TYPES).
+  assert.deepEqual(AUDIT_EVENT_TYPES.filter((t) => t.startsWith('passport.')), ['passport.issued', 'passport.status_changed']);
+});
+
+test('unknown event types are rejected', async () => {
+  const store = new MemoryStore();
+  const audit = auditService({ store, clock: { now: () => new Date() } });
+  await assert.rejects(audit.record(null, 'passport.deleted', { type: 'passport', id: 'pp_X' }, {}), /unknown audit event type/);
+  assert.equal(store._auditLog.length, 0);
 });

@@ -58,6 +58,15 @@ function harnessRepo(col, timeField) {
   const base = repo(col, timeField);
   return {
     ...base,
+    /** Conditional `$set` plus an optional `$push` (e.g. `statusHistory`) in the same atomic update. */
+    async updateIf(id, fromStatuses, patch, push) {
+      if (!push) return base.updateIf(id, fromStatuses, patch);
+      const q = { _id: id };
+      if (fromStatuses) q.status = { $in: fromStatuses };
+      const res = await col.findOneAndUpdate(q, { $set: patch, $push: push }, { returnDocument: 'after', includeResultMetadata: false });
+      const doc = res && Object.prototype.hasOwnProperty.call(res, 'value') && Object.prototype.hasOwnProperty.call(res, 'ok') ? res.value : res;
+      return fromDoc(doc);
+    },
     find: async (filter = {}, { sort = { _id: 1 }, limit = 1000 } = {}) =>
       (await col.find(filter).sort(sort).limit(limit).toArray()).map(fromDoc),
     upsert: async (d) => {
