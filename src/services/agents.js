@@ -7,7 +7,7 @@ import { schemas } from '../validate.js';
 import { agentOut, pageOut } from './serialize.js';
 import { ensureValid, invalidState, notFound, pageQuery } from './util.js';
 
-export function agentService({ store, clock }) {
+export function agentService({ store, clock, audit }) {
   /** Admin: any agent. Operator: own agents only (others look non-existent). */
   async function loadOwned(principal, id) {
     const agent = await store.agents.findById(id);
@@ -16,10 +16,16 @@ export function agentService({ store, clock }) {
     return agent;
   }
 
-  async function transition(principal, id, fromStatuses, patch, errorMessage) {
+  async function transition(principal, id, fromStatuses, patch, errorMessage, eventType) {
     const agent = await loadOwned(principal, id);
     const updated = await store.agents.setStatus(id, fromStatuses, { ...patch, updatedAt: clock.now() });
     if (!updated) throw invalidState(`${errorMessage} (agent is ${agent.status})`);
+    await audit.record(principal, eventType, { type: 'agent', id }, {
+      operatorId: updated.operatorId,
+      fromStatus: agent.status,
+      toStatus: updated.status,
+      reason: patch.statusReason ?? null,
+    });
     return agentOut(updated);
   }
 
@@ -56,6 +62,14 @@ export function agentService({ store, clock }) {
         if (err instanceof ConflictError) throw new ApiError('CONFLICT', 'Public key is already registered');
         throw err;
       }
+      // An unaudited registration must not stay usable: suspend it if the log write fails.
+      await audit.recordOrCompensate(
+        principal,
+        'agent.registered',
+        { type: 'agent', id: doc.id },
+        { operatorId: doc.operatorId, keyThumbprint: doc.keyThumbprint, name: doc.name },
+        () => store.agents.setStatus(doc.id, ['active'], { status: 'suspended', statusReason: 'audit log unavailable', updatedAt: clock.now() }),
+      );
       return agentOut(doc);
     },
 
@@ -76,11 +90,11 @@ export function agentService({ store, clock }) {
 
     suspend(principal, id, body) {
       ensureValid(schemas.reason, body);
-      return transition(principal, id, ['active'], { status: 'suspended', statusReason: body.reason }, 'Only active agents can be suspended');
+      return transition(principal, id, ['active'], { status: 'suspended', statusReason: body.reason }, 'Only active agents can be suspended', 'agent.suspended');
     },
 
     reactivate(principal, id) {
-      return transition(principal, id, ['suspended'], { status: 'active', statusReason: null }, 'Only suspended agents can be reactivated');
+      return transition(principal, id, ['suspended'], { status: 'active', statusReason: null }, 'Only suspended agents can be reactivated', 'agent.reactivated');
     },
 
     revoke(principal, id, body) {
@@ -92,6 +106,7 @@ export function agentService({ store, clock }) {
         ['active', 'suspended'],
         { status: 'revoked', statusReason: body.reason, revokedAt: now },
         'Agent is already revoked',
+        'agent.revoked',
       );
     },
   };

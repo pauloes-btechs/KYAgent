@@ -7,7 +7,7 @@ import { ensureValid, invalidState, notFound, pageQuery } from './util.js';
 const TOUCH_INTERVAL_MS = 60_000;
 const unauthenticated = () => new ApiError('UNAUTHENTICATED', 'Missing or invalid API key');
 
-export function apiKeyService({ store, clock, config }) {
+export function apiKeyService({ store, clock, config, audit }) {
   return {
     async create(principal, body) {
       ensureValid(schemas.createApiKey, body);
@@ -33,6 +33,14 @@ export function apiKeyService({ store, clock, config }) {
         revokedAt: null,
       };
       await store.apiKeys.insert(doc);
+      // Never log the secret or its hash; revoke the key if the event cannot be recorded.
+      await audit.recordOrCompensate(
+        principal,
+        'api_key.created',
+        { type: 'api_key', id: doc.id },
+        { role: doc.role, ownerId: doc.ownerId, name: doc.name },
+        () => store.apiKeys.revoke(doc.id, { revokedAt: clock.now() }),
+      );
       return { apiKey: apiKeyOut(doc), secret: plaintext };
     },
 
@@ -45,6 +53,7 @@ export function apiKeyService({ store, clock, config }) {
       if (!existing) throw notFound();
       const updated = await store.apiKeys.revoke(id, { revokedAt: clock.now() });
       if (!updated) throw invalidState('API key is already revoked');
+      await audit.record(principal, 'api_key.revoked', { type: 'api_key', id }, { role: updated.role, ownerId: updated.ownerId });
       return apiKeyOut(updated);
     },
 

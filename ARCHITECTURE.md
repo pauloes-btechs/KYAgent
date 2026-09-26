@@ -162,6 +162,7 @@ owns grant; credential audience/agent owner). `—` = `403 FORBIDDEN`.
 | `POST /v1/grants/{id}/revoke` | ✔ | — | own |
 | `POST /v1/verify` | — | — | ✔ |
 | `GET /v1/verifications` | ✔ | — | own |
+| `GET /v1/audit-events`, `GET /v1/audit-events/integrity` | ✔ | — | — |
 
 ## 6. Technology and repository layout
 

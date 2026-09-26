@@ -124,6 +124,24 @@ export class MemoryStore {
       insert: (d) => events.insert(d),
       list: (q) => events.list(q),
     };
+    // Append-only: no update/delete methods exist. `seq` must extend the chain by
+    // exactly one (the in-memory analogue of Mongo's unique `seq` index).
+    const auditLog = [];
+    const audit = new Collection({ timeField: 'occurredAt' });
+    this.auditEvents = {
+      append: async (d) => {
+        const expected = auditLog.length ? auditLog[auditLog.length - 1].seq + 1 : 1;
+        if (d.seq !== expected) throw new ConflictError('audit sequence conflict');
+        await audit.insert(d);
+        auditLog.push(clone(d));
+        return clone(d);
+      },
+      last: async () => clone(auditLog[auditLog.length - 1] ?? null),
+      /** Events with seq >= fromSeq, ascending, at most `limit`. */
+      range: async (fromSeq, limit) => auditLog.filter((e) => e.seq >= fromSeq).slice(0, limit).map(clone),
+      list: (q) => audit.list(q),
+    };
+    this._auditLog = auditLog;
   }
 
   async init() {}

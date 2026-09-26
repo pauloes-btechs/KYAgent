@@ -21,6 +21,7 @@ tags:
   - name: grants
   - name: credentials
   - name: verification
+  - name: audit
 
 paths:
   /healthz:
@@ -654,6 +655,61 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
 
+  /v1/audit-events:
+    get:
+      tags: [audit]
+      operationId: listAuditEvents
+      x-roles: [admin]
+      description: >-
+        Append-only, hash-chained audit log (REQ-008) of registration, issuance,
+        verification and revocation events. Newest first.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/AuditEventType' }
+        - name: subjectId
+          in: query
+          schema: { type: string, maxLength: 64 }
+      responses:
+        '200':
+          description: Page of audit events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/AuditEvent' } }
+                  nextCursor: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /v1/audit-events/integrity:
+    get:
+      tags: [audit]
+      operationId: verifyAuditChain
+      x-roles: [admin]
+      description: Recomputes the hash chain; `valid=false` means stored events were edited, deleted or reordered.
+      responses:
+        '200':
+          description: Chain verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [valid, count, headHash, brokenAtSeq]
+                properties:
+                  valid: { type: boolean }
+                  count: { type: integer, minimum: 0 }
+                  headHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+                  brokenAtSeq: { type: [integer, 'null'] }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+
 components:
   securitySchemes:
     apiKey:
@@ -1015,6 +1071,32 @@ components:
         grantId: { type: [string, 'null'] }
         credentialId: { type: [string, 'null'] }
         evaluatedAt: { $ref: '#/components/schemas/IsoDateTime' }
+    AuditEventType:
+      type: string
+      enum: [operator.created, operator.verification_completed, operator.suspended, business.created, api_key.created, api_key.revoked, agent.registered, agent.suspended, agent.reactivated, agent.revoked, grant.created, grant.revoked, credential.issued, credential.revoked, verification.decided]
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required: [id, seq, type, occurredAt, actor, subjectType, subjectId, requestId, data, prevHash, hash]
+      properties:
+        id: { type: string, description: 'aud_...' }
+        seq: { type: integer, minimum: 1 }
+        type: { $ref: '#/components/schemas/AuditEventType' }
+        occurredAt: { $ref: '#/components/schemas/IsoDateTime' }
+        actor:
+          type: object
+          additionalProperties: false
+          required: [role, apiKeyId, ownerId]
+          properties:
+            role: { type: string, enum: [admin, operator, business, system] }
+            apiKeyId: { type: [string, 'null'] }
+            ownerId: { type: [string, 'null'] }
+        subjectType: { type: string, enum: [operator, business, api_key, agent, grant, credential, verification] }
+        subjectId: { type: string }
+        requestId: { type: [string, 'null'] }
+        data: { type: object, description: 'Event-specific ids and non-secret metadata' }
+        prevHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        hash: { type: string, pattern: '^[0-9a-f]{64}$' }
     VerificationEvent:
       allOf:
         - $ref: '#/components/schemas/VerifyResponse'
