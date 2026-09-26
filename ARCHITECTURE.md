@@ -133,6 +133,7 @@ Constraints (all optional, all must hold):
 | RBAC (REQ-010) | Role from the key; ownership (tenant) enforced in the service layer. Cross-tenant reads return `404 NOT_FOUND` (no existence oracle). Matrix in §5. |
 | Secrets (REQ-011) | Server signing key and API-key pepper come only from env vars or `*_FILE` secret files. In `production`, missing secrets ⇒ refuse to start. In dev/test, an **ephemeral in-memory** key/pepper is generated with a warning. Secrets are never logged, returned, or committed (`.gitignore` covers `.env`, `*.pem`, `secrets/`). |
 | Deny by default (REQ-012) | See §3. Unknown agent, malformed input, store errors, unexpected exceptions ⇒ `DENY`. Unauthenticated/unauthorized callers get `401/403`, never a decision. |
+| Rate limiting (REQ-016) | `POST /v1/verify` and registration routes (`POST /v1/agents`, `/v1/operators`, `/v1/businesses`): per-IP fixed-window budget before authentication + per-tenant budget after RBAC ⇒ `429 RATE_LIMITED` + `Retry-After`, no decision recorded. In-process state (per replica). See `error-model.md` §4. |
 | Input limits | Body ≤ `KYA_MAX_BODY_BYTES` (default 64 KiB); strict schemas (`additionalProperties: false`); string length caps per OpenAPI. |
 | Logging | Structured JSON logs with `requestId`. Never log Authorization headers, API key secrets, credentials JWS, private keys or pepper. |
 
@@ -232,3 +233,4 @@ unauthenticated traffic, agent key rotation (revoke and re-register instead).
 | REQ-010 API keys hashed + RBAC | `api_keys` (HMAC-SHA256 + pepper), §5 matrix |
 | REQ-011 secrets from env/secret store | `environment.md`, `*_FILE` support, production fail-fast |
 | REQ-012 deny by default | §3 algorithm, `INTERNAL_ERROR` ⇒ DENY |
+| REQ-016 rate limiting | `src/rateLimit.js`, `error-model.md` §4, `KYA_RATE_LIMIT_*` |

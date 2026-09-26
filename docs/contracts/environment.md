@@ -27,6 +27,11 @@ If both are set ⇒ config error. File contents are trimmed of trailing whitespa
 | `KYA_CREDENTIAL_DEFAULT_TTL_SECONDS` | no | `900` | Integer ≥ 60 and ≤ max |
 | `KYA_CREDENTIAL_MAX_TTL_SECONDS` | no | `3600` | Integer 60..86400 |
 | `KYA_MAX_BODY_BYTES` | no | `65536` | Request body limit |
+| `KYA_RATE_LIMIT_ENABLED` | no | `true` | `true` \| `false`. `false` disables REQ-016 rate limiting (startup warning). Any other value ⇒ config error. |
+| `KYA_RATE_LIMIT_WINDOW_SECONDS` | no | `60` | Fixed window length, integer 1..3600 |
+| `KYA_RATE_LIMIT_IP_PER_WINDOW` | no | `1200` | Requests per client IP per window to rate-limited routes, counted **before** authentication |
+| `KYA_RATE_LIMIT_VERIFY_PER_WINDOW` | no | `600` | `POST /v1/verify` calls per business per window |
+| `KYA_RATE_LIMIT_REGISTER_PER_WINDOW` | no | `30` | Registration calls (`POST /v1/agents`, `/v1/operators`, `/v1/businesses`) per tenant per window |
 | `SANCTIONS_MODE` | no | `mock` | `mock` \| `off`. Any other value (e.g. `live`) ⇒ treated as `mock` with a startup warning (no live provider in MVP; fail safe, never silently `off`). |
 | `CHAIN_MODE` | no | unset | Read and ignored; blockchain registry is a non-goal. Logged at startup as "ignored". |
 | `LLM_MODE` | no | unset | Read and ignored; no LLM features in MVP. |

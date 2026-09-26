@@ -83,6 +83,7 @@ paths:
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
     get:
       tags: [businesses]
       operationId: listBusinesses
@@ -140,6 +141,7 @@ paths:
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
     get:
       tags: [operators]
       operationId: listOperators
@@ -319,6 +321,7 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
     get:
       tags: [agents]
       operationId: listAgents
@@ -620,7 +623,7 @@ paths:
         Deny-by-default ALLOW/DENY decision for an agent's signed action request
         (ARCHITECTURE.md §3). Malformed or oversized bodies yield 200 DENY MALFORMED_REQUEST
         (not 400). Internal failures yield 500 with a DENY/INTERNAL_ERROR decision body.
-        Only 401/403 use the standard error envelope.
+        Only 401/403/429 use the standard error envelope (429 RATE_LIMITED, REQ-016).
       requestBody:
         required: true
         content:
@@ -634,6 +637,7 @@ paths:
               schema: { $ref: '#/components/schemas/VerifyResponse' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
         '500':
           description: Evaluation failed — fail closed
           content:
@@ -816,7 +820,7 @@ components:
             code:
               type: string
               enum: [VALIDATION_ERROR, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, CONFLICT, INVALID_STATE,
-                     OPERATOR_NOT_VERIFIED, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE, INTERNAL_ERROR,
+                     OPERATOR_NOT_VERIFIED, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE, RATE_LIMITED, INTERNAL_ERROR,
                      SERVICE_UNAVAILABLE]
             message: { type: string }
             requestId: { type: string }

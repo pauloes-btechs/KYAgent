@@ -40,6 +40,7 @@ KYAgent has two distinct failure channels. Do not mix them.
 | `OPERATOR_NOT_VERIFIED` | 409 | Operator is not `verified` and tries to register an agent or issue a credential |
 | `PAYLOAD_TOO_LARGE` | 413 | Body > `KYA_MAX_BODY_BYTES` |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | Non-JSON body on a JSON endpoint |
+| `RATE_LIMITED` | 429 | Rate limit exceeded on a rate-limited endpoint (`POST /v1/verify`, `POST /v1/agents`, `POST /v1/operators`, `POST /v1/businesses`). Includes `Retry-After` (seconds). See §4. |
 | `INTERNAL_ERROR` | 500 | Unexpected error. Logged with stack server-side; generic message to client |
 | `SERVICE_UNAVAILABLE` | 503 | Store unreachable at request time |
 
@@ -101,3 +102,24 @@ Evaluated in the order of ARCHITECTURE.md §3. `DENY` responses carry exactly on
 
 Reason `message` strings are informational; they MUST NOT reveal key material,
 other tenants' data, or whether an agent exists beyond what the code conveys.
+
+## 4. Rate limiting (REQ-016)
+
+Rate-limited routes: `POST /v1/verify` (class `verify`) and the registration
+routes `POST /v1/agents`, `POST /v1/operators`, `POST /v1/businesses` (class `register`).
+Fixed windows of `KYA_RATE_LIMIT_WINDOW_SECONDS`; limits in `environment.md`.
+
+1. **Per client IP, before authentication** (`KYA_RATE_LIMIT_IP_PER_WINDOW`, shared
+   by all rate-limited routes). Bounds unauthenticated floods and API-key guessing.
+   The IP is the TCP peer address; `X-Forwarded-For` is **not** trusted.
+2. **Per tenant, after authentication and RBAC** (operator id / business id; admin
+   keys are counted per key). Budgets per class.
+
+Exceeding either ⇒ `429 RATE_LIMITED` in the standard error envelope with a
+`Retry-After` header (seconds). On `/v1/verify` this is an HTTP error like
+401/403: **no decision is produced and no verification event is recorded**;
+clients already treat anything but `200 ALLOW` as a denial.
+
+State is in-process memory (bounded key count). With multiple replicas the
+effective limit is multiplied by the replica count (acceptable for the MVP
+single-instance deployment).
