@@ -84,7 +84,30 @@ test('invalid values are always config errors', () => {
   assert.throws(() => loadConfig({ NODE_ENV: 'test', KYA_BOOTSTRAP_ADMIN_API_KEY: 'kya_bad' }), ConfigError);
   assert.throws(() => loadConfig({ NODE_ENV: 'staging' }), ConfigError);
   assert.ok(loadConfig({ NODE_ENV: 'test', KYA_BOOTSTRAP_ADMIN_API_KEY: generateApiKey().plaintext }));
-  const c = loadConfig({ NODE_ENV: 'test', CHAIN_MODE: 'on', LLM_MODE: 'on', SANCTIONS_MODE: 'live' });
-  assert.equal(c.sanctionsMode, 'mock');
-  assert.equal(c.warnings.filter((w) => /ignored|unsupported/.test(w)).length, 3);
+  for (const name of ['SANCTIONS_MODE', 'CHAIN_MODE', 'LLM_MODE', 'EMBEDDINGS_MODE']) {
+    assert.throws(() => loadConfig({ NODE_ENV: 'test', [name]: 'on' }), (err) => err instanceof ConfigError && err.message.includes(name));
+  }
+});
+
+test('data-source modes are live|fixture and default to fixture (offline)', () => {
+  const d = loadConfig({ NODE_ENV: 'test' });
+  assert.deepEqual(d.modes, { sanctions: 'fixture', chain: 'fixture', llm: 'fixture', embeddings: 'fixture' });
+  assert.equal(d.sanctionsMode, 'mock');
+  assert.ok(!d.warnings.some((w) => /ignored|unsupported/.test(w)));
+
+  const live = loadConfig({ NODE_ENV: 'test', SANCTIONS_MODE: 'live', CHAIN_MODE: 'live', LLM_MODE: 'live', EMBEDDINGS_MODE: 'live' });
+  assert.deepEqual(live.modes, { sanctions: 'live', chain: 'live', llm: 'live', embeddings: 'live' });
+  // Operator onboarding keeps screening names: it is never silently off.
+  assert.equal(live.sanctionsMode, 'mock');
+
+  const fx = loadConfig({ NODE_ENV: 'test', SANCTIONS_MODE: 'fixture', CHAIN_MODE: 'fixture', LLM_MODE: '', EMBEDDINGS_MODE: 'fixture' });
+  assert.deepEqual(fx.modes, { sanctions: 'fixture', chain: 'fixture', llm: 'fixture', embeddings: 'fixture' });
+  assert.equal(fx.sanctionsMode, 'mock');
+
+  // Legacy onboarding values stay accepted; wallet screening data still comes from fixtures.
+  const off = loadConfig({ NODE_ENV: 'test', SANCTIONS_MODE: 'off' });
+  assert.equal(off.sanctionsMode, 'off');
+  assert.equal(off.modes.sanctions, 'fixture');
+  assert.ok(off.warnings.some((w) => w.includes('SANCTIONS_MODE=off')));
+  assert.equal(loadConfig({ NODE_ENV: 'test', SANCTIONS_MODE: 'mock' }).modes.sanctions, 'fixture');
 });
