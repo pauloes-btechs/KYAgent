@@ -11,6 +11,7 @@ import { newId } from './ids.js';
 import { createLogger } from './logger.js';
 import { agentService } from './services/agents.js';
 import { apiKeyService } from './services/apiKeys.js';
+import { AUDIT_EVENT_TYPES, auditService } from './services/audit.js';
 import { credentialService } from './services/credentials.js';
 import { grantService } from './services/grants.js';
 import { businessService, operatorService } from './services/operators.js';
@@ -37,6 +38,7 @@ const q = {
   agentStatus: { enum: ['active', 'suspended', 'revoked'] },
   grantStatus: { enum: ['active', 'revoked'] },
   decision: { enum: ['ALLOW', 'DENY'] },
+  auditType: { enum: AUDIT_EVENT_TYPES },
 };
 
 function loadDashboard() {
@@ -122,8 +124,10 @@ function parseQuery(url, spec, paginated) {
 }
 
 export function buildApp({ config, store, clock = systemClock, logger = createLogger(config.logLevel) }) {
-  const deps = { store, clock, config };
+  const audit = auditService({ store, clock });
+  const deps = { store, clock, config, audit };
   const services = {
+    audit,
     apiKeys: apiKeyService(deps),
     businesses: businessService(deps),
     operators: operatorService(deps),
@@ -169,6 +173,8 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
     { m: 'POST', p: '/v1/credentials/:id/revoke', roles: ALL, body: 'json', h: (c) => s.credentials.revoke(c.principal, c.id, c.body) },
 
     { m: 'POST', p: '/v1/verify', roles: ['business'], body: 'verify', h: null },
+    { m: 'GET', p: '/v1/audit-events', roles: ['admin'], query: { type: q.auditType, subjectId: q.str64 }, h: (c) => s.audit.list(c.principal, c.query) },
+    { m: 'GET', p: '/v1/audit-events/integrity', roles: ['admin'], h: () => s.audit.verifyChain() },
     { m: 'GET', p: '/v1/verifications', roles: ['admin', 'business'], query: { agentId: q.str64, decision: q.decision }, h: (c) => s.verification.list(c.principal, c.query) },
   ].map((r) => ({ ...r, segs: r.p.split('/') }));
 
@@ -268,7 +274,8 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
       const bodyPromise = readBody(req, config.maxBodyBytes);
       bodyPromise.catch(() => {});
 
-      const principal = await services.apiKeys.authenticate(req.headers.authorization);
+      // requestId travels with the principal so audit events can be correlated with logs.
+      const principal = { ...(await services.apiKeys.authenticate(req.headers.authorization)), requestId };
       if (!route.roles.includes(principal.role)) throw new ApiError('FORBIDDEN');
 
       const { raw, tooLarge } = await bodyPromise;

@@ -5,12 +5,13 @@ import { runOperatorVerification } from './kyc.js';
 import { businessOut, operatorOut, operatorPublicOut, pageOut } from './serialize.js';
 import { ensureValid, invalidState, notFound, pageQuery } from './util.js';
 
-export function businessService({ store, clock }) {
+export function businessService({ store, clock, audit }) {
   return {
     async create(principal, body) {
       ensureValid(schemas.createBusiness, body);
       const doc = { id: newId(ID_PREFIX.business), name: body.name, status: 'active', createdAt: clock.now() };
       await store.businesses.insert(doc);
+      await audit.record(principal, 'business.created', { type: 'business', id: doc.id }, { name: doc.name });
       return businessOut(doc);
     },
     async list(principal, q) {
@@ -25,7 +26,7 @@ export function businessService({ store, clock }) {
   };
 }
 
-export function operatorService({ store, clock, config }) {
+export function operatorService({ store, clock, config, audit }) {
   return {
     async create(principal, body) {
       ensureValid(schemas.createOperator, body);
@@ -43,6 +44,8 @@ export function operatorService({ store, clock, config }) {
         updatedAt: now,
       };
       await store.operators.insert(doc);
+      // Contact email is PII and deliberately not copied into the immutable log.
+      await audit.record(principal, 'operator.created', { type: 'operator', id: doc.id }, { type: doc.type, country: doc.country });
       return operatorOut(doc);
     },
 
@@ -65,6 +68,14 @@ export function operatorService({ store, clock, config }) {
       const result = runOperatorVerification(op, config.sanctionsMode, now);
       const updated = await store.operators.update(id, ['pending', 'rejected'], { ...result, updatedAt: now });
       if (!updated) throw invalidState('Operator state changed concurrently');
+      await audit.record(principal, 'operator.verification_completed', { type: 'operator', id }, {
+        fromStatus: op.status,
+        toStatus: updated.status,
+        method: updated.verification?.method,
+        kycResult: updated.verification?.kycResult,
+        sanctionsMode: updated.verification?.sanctionsMode,
+        sanctionsResult: updated.verification?.sanctionsResult,
+      });
       return operatorOut(updated);
     },
 
@@ -75,6 +86,7 @@ export function operatorService({ store, clock, config }) {
       const now = clock.now();
       const updated = await store.operators.update(id, ['verified'], { status: 'suspended', statusReason: body.reason, updatedAt: now });
       if (!updated) throw invalidState(`Only verified operators can be suspended (operator is ${op.status})`);
+      await audit.record(principal, 'operator.suspended', { type: 'operator', id }, { fromStatus: op.status, reason: body.reason });
       return operatorOut(updated);
     },
   };
