@@ -9,6 +9,7 @@ import { jwks } from './crypto/credentials.js';
 import { ApiError, toApiError, validationError } from './errors.js';
 import { newId } from './ids.js';
 import { createLogger } from './logger.js';
+import { createRateLimits, principalKey } from './rateLimit.js';
 import { agentService } from './services/agents.js';
 import { apiKeyService } from './services/apiKeys.js';
 import { AUDIT_EVENT_TYPES, auditService } from './services/audit.js';
@@ -149,14 +150,15 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
   const s = services;
   const dashboard = loadDashboard();
   const openapiSpec = loadOpenApi();
+  const limits = createRateLimits(config, clock);
 
   // body: 'json' = required JSON object body, 'none' = body ignored, 'verify' = decision semantics
   const routes = [
-    { m: 'POST', p: '/v1/businesses', roles: ['admin'], body: 'json', status: 201, h: (c) => s.businesses.create(c.principal, c.body) },
+    { m: 'POST', p: '/v1/businesses', roles: ['admin'], body: 'json', status: 201, rateLimit: 'register', h: (c) => s.businesses.create(c.principal, c.body) },
     { m: 'GET', p: '/v1/businesses', roles: ['admin'], h: (c) => s.businesses.list(c.principal, c.query) },
     { m: 'GET', p: '/v1/businesses/:id', roles: ['admin', 'business'], h: (c) => s.businesses.get(c.principal, c.id) },
 
-    { m: 'POST', p: '/v1/operators', roles: ['admin'], body: 'json', status: 201, h: (c) => s.operators.create(c.principal, c.body) },
+    { m: 'POST', p: '/v1/operators', roles: ['admin'], body: 'json', status: 201, rateLimit: 'register', h: (c) => s.operators.create(c.principal, c.body) },
     { m: 'GET', p: '/v1/operators', roles: ['admin'], query: { status: q.operatorStatus }, h: (c) => s.operators.list(c.principal, c.query) },
     { m: 'GET', p: '/v1/operators/:id', roles: ALL, h: (c) => s.operators.get(c.principal, c.id) },
     { m: 'POST', p: '/v1/operators/:id/verification', roles: ['admin'], h: (c) => s.operators.verify(c.principal, c.id) },
@@ -166,7 +168,7 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
     { m: 'GET', p: '/v1/api-keys', roles: ['admin'], query: { ownerId: q.str64 }, h: (c) => s.apiKeys.list(c.principal, c.query) },
     { m: 'POST', p: '/v1/api-keys/:id/revoke', roles: ['admin'], h: (c) => s.apiKeys.revoke(c.principal, c.id) },
 
-    { m: 'POST', p: '/v1/agents', roles: ['operator'], body: 'json', status: 201, h: (c) => s.agents.register(c.principal, c.body) },
+    { m: 'POST', p: '/v1/agents', roles: ['operator'], body: 'json', status: 201, rateLimit: 'register', h: (c) => s.agents.register(c.principal, c.body) },
     { m: 'GET', p: '/v1/agents', roles: ['admin', 'operator'], query: { operatorId: q.str64, status: q.agentStatus }, h: (c) => s.agents.list(c.principal, c.query) },
     { m: 'GET', p: '/v1/agents/:id', roles: ALL, h: (c) => s.agents.get(c.principal, c.id) },
     { m: 'POST', p: '/v1/agents/:id/suspend', roles: ['admin', 'operator'], body: 'json', h: (c) => s.agents.suspend(c.principal, c.id, c.body) },
@@ -183,7 +185,7 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
     { m: 'GET', p: '/v1/credentials/:id', roles: ALL, h: (c) => s.credentials.get(c.principal, c.id) },
     { m: 'POST', p: '/v1/credentials/:id/revoke', roles: ALL, body: 'json', h: (c) => s.credentials.revoke(c.principal, c.id, c.body) },
 
-    { m: 'POST', p: '/v1/verify', roles: ['business'], body: 'verify', h: null },
+    { m: 'POST', p: '/v1/verify', roles: ['business'], body: 'verify', rateLimit: 'verify', h: null },
     { m: 'GET', p: '/v1/audit-events', roles: ['admin'], query: { type: q.auditType, subjectId: q.str64 }, h: (c) => s.audit.list(c.principal, c.query) },
     { m: 'GET', p: '/v1/audit-events/integrity', roles: ['admin'], h: () => s.audit.verifyChain() },
     { m: 'GET', p: '/v1/verifications', roles: ['admin', 'business'], query: { agentId: q.str64, decision: q.decision }, h: (c) => s.verification.list(c.principal, c.query) },
@@ -224,6 +226,7 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
 
   function sendError(res, err, requestId) {
     const headers = err.code === 'UNAUTHENTICATED' ? { 'WWW-Authenticate': 'Bearer' } : {};
+    if (err.code === 'RATE_LIMITED' && err.retryAfter) headers['Retry-After'] = String(err.retryAfter);
     send(res, err.status, err.toBody(requestId), requestId, headers);
   }
 
@@ -242,6 +245,15 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
       'X-Request-Id': requestId,
     });
     res.end(file.body);
+  }
+
+  function enforceLimit(limiter, key) {
+    const r = limiter.hit(key);
+    if (!r.allowed) {
+      const err = new ApiError('RATE_LIMITED');
+      err.retryAfter = r.retryAfter;
+      throw err;
+    }
   }
 
   async function handle(req, res) {
@@ -296,9 +308,12 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
       const bodyPromise = readBody(req, config.maxBodyBytes);
       bodyPromise.catch(() => {});
 
+      // REQ-016: per-IP budget is charged before authentication, per-tenant budget after it.
+      if (route.rateLimit && limits.enabled) enforceLimit(limits.ip, `ip:${req.socket.remoteAddress ?? 'unknown'}`);
       // requestId travels with the principal so audit events can be correlated with logs.
       const principal = { ...(await services.apiKeys.authenticate(req.headers.authorization)), requestId };
       if (!route.roles.includes(principal.role)) throw new ApiError('FORBIDDEN');
+      if (route.rateLimit && limits.enabled) enforceLimit(limits[route.rateLimit], principalKey(principal));
 
       const { raw, tooLarge } = await bodyPromise;
 

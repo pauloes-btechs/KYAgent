@@ -80,6 +80,19 @@ export function loadConfig(env = process.env) {
   const maxBodyBytes = intVar(env, 'KYA_MAX_BODY_BYTES', 65536, 1024, 10 * 1024 * 1024);
   const port = intVar(env, 'PORT', 8080, 0, 65535);
 
+  // --- rate limiting (REQ-016)
+  const rlEnabledRaw = env.KYA_RATE_LIMIT_ENABLED;
+  if (rlEnabledRaw !== undefined && rlEnabledRaw !== '' && rlEnabledRaw !== 'true' && rlEnabledRaw !== 'false') {
+    throw new ConfigError('KYA_RATE_LIMIT_ENABLED must be true or false');
+  }
+  const rateLimit = {
+    enabled: rlEnabledRaw !== 'false',
+    windowSeconds: intVar(env, 'KYA_RATE_LIMIT_WINDOW_SECONDS', 60, 1, 3600),
+    ipPerWindow: intVar(env, 'KYA_RATE_LIMIT_IP_PER_WINDOW', 1200, 1, 1_000_000),
+    verifyPerWindow: intVar(env, 'KYA_RATE_LIMIT_VERIFY_PER_WINDOW', 600, 1, 1_000_000),
+    registerPerWindow: intVar(env, 'KYA_RATE_LIMIT_REGISTER_PER_WINDOW', 30, 1, 1_000_000),
+  };
+
   // --- server signing key
   const signingSecret = readSecret(env, 'KYA_SIGNING_PRIVATE_KEY');
   let signingKey;
@@ -137,6 +150,7 @@ export function loadConfig(env = process.env) {
     warnings.push('SANCTIONS_MODE has an unsupported value: treating it as "mock"');
     sanctionsMode = 'mock';
   }
+  if (!rateLimit.enabled) warnings.push('KYA_RATE_LIMIT_ENABLED=false: public verification and registration endpoints are not rate limited');
   if (env.CHAIN_MODE) warnings.push('CHAIN_MODE is set but ignored (blockchain registry is a non-goal)');
   if (env.LLM_MODE) warnings.push('LLM_MODE is set but ignored (no LLM features in MVP)');
 
@@ -153,6 +167,7 @@ export function loadConfig(env = process.env) {
     credentialDefaultTtlSeconds: defaultTtl,
     credentialMaxTtlSeconds: maxTtl,
     maxBodyBytes,
+    rateLimit,
     sanctionsMode,
     sources: { signingKey: signingKeySource, pepper: pepperSource, bootstrapAdmin: bootstrap.source },
     warnings,
