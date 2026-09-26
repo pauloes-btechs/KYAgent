@@ -24,6 +24,7 @@ const DASHBOARD_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'dashb
 const DASHBOARD_FILES = {
   'index.html': 'text/html; charset=utf-8',
   'app.js': 'text/javascript; charset=utf-8',
+  'trust.js': 'text/javascript; charset=utf-8',
   'styles.css': 'text/css; charset=utf-8',
 };
 const DASHBOARD_CSP =
