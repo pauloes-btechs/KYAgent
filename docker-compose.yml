@@ -1,0 +1,20 @@
+# Local stack: API + MongoDB. Secrets come from an untracked .env file
+# (see .env.example and `npm run gen:*`); nothing secret lives in this file.
+services:
+  api:
+    build: .
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB: kyagent
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mongo
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo-data:/data/db
+volumes:
+  mongo-data:
