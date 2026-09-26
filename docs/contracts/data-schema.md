@@ -140,6 +140,36 @@ Indexes: `{ businessId: 1, evaluatedAt: -1 }`, `{ agentId: 1, evaluatedAt: -1 }`
 Append-only; never updated or deleted by the API. Never stores signatures,
 credentials or context values (only the ids above).
 
+## `audit_events` (REQ-008, append-only audit log)
+
+| Field | Type | Notes |
+|---|---|---|
+| `_id` | string | `aud_...` |
+| `seq` | int | 1, 2, 3, … contiguous; **unique** |
+| `type` | string | `AuditEventType` (types.ts): registration (`operator.created`, `operator.verification_completed`, `business.created`, `api_key.created`, `agent.registered`, `grant.created`), issuance (`credential.issued`), verification (`verification.decided`), revocation/suspension (`*.revoked`, `*.suspended`, `agent.reactivated`) |
+| `occurredAt` | Date | |
+| `actor` | `{ role, apiKeyId, ownerId }` | from the authenticated principal |
+| `subjectType`, `subjectId` | string | resource the event is about (`verification` → `vrf_...`) |
+| `requestId` | string \| null | correlates with logs |
+| `data` | object | ids + non-secret metadata (status transitions, reasons, decision, reason code) |
+| `prevHash`, `hash` | string | hex SHA-256 hash chain; `hash = sha256(canonicalJson({v:1, id, seq, type, occurredAt(ISO), actor, subjectType, subjectId, requestId, data, prevHash}))`, `prevHash` of seq 1 = 64 × `0` |
+
+Indexes: `{ seq: 1 }` **unique**, `{ occurredAt: -1, _id: -1 }`, `{ subjectId: 1, occurredAt: -1 }`, `{ type: 1, occurredAt: -1 }`.
+
+Rules:
+- **Append-only.** The store exposes only `append`, `last`, `range`, `list`; there is
+  no update or delete path. Production deployments should additionally grant the
+  service's DB user only `insert`/`find` on this collection.
+- Appends are serialized per process; a duplicate `seq` (another writer won) is retried.
+- Tamper evidence: `GET /v1/audit-events/integrity` (admin) recomputes the chain and
+  reports the first broken `seq` (edited, deleted or reordered event).
+- **Fail closed.** A failed audit write fails the operation: `/v1/verify` returns
+  `DENY / INTERNAL_ERROR`; credential issuance returns 500 without the JWS and revokes
+  the record; unaudited agent registrations are suspended, grants and API keys revoked.
+  Revocations remain in effect (the safe direction) but the request reports 500.
+- Never stores API-key secrets or hashes, credential JWS, signatures, nonces,
+  private keys, verification context values or operator contact email.
+
 ## Store interface (implementation contract)
 
 `src/store/Store.ts` exposes per-collection repositories with methods used by
@@ -158,6 +188,7 @@ interface Store {
   credentials: { insert; findById; list; revoke };
   nonces: { insertOnce(agentId, nonce, expiresAt): Promise<boolean> }; // false => replay
   verificationEvents: { insert; list };
+  auditEvents: { append; last; range(fromSeq, limit); list };      // append throws ConflictError on dup seq
 }
 ```
 

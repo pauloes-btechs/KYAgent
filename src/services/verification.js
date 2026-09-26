@@ -47,7 +47,7 @@ function checkWellFormed(body) {
   return { agentId: body.agentId, action: body.action, resource, context: body.context ?? {}, credential: body.credential, sr };
 }
 
-export function verificationService({ store, clock, config }) {
+export function verificationService({ store, clock, config, audit }) {
   async function evaluate(principal, body, out) {
     const now = clock.now();
     const nowSec = Math.floor(now.getTime() / 1000);
@@ -173,13 +173,36 @@ export function verificationService({ store, clock, config }) {
         reasons: [{ code, message: REASON_MESSAGES[code] }],
         evaluatedAt: clock.now(),
       };
-      try {
-        await store.verificationEvents.insert(event);
-      } catch {
-        // An unauditable decision must not be an ALLOW: fail closed.
+      // An unauditable decision must not be an ALLOW: fail closed.
+      const failClosed = () => {
         event.decision = 'DENY';
         event.reasons = [{ code: 'INTERNAL_ERROR', message: REASON_MESSAGES.INTERNAL_ERROR }];
         status = 500;
+      };
+      // REQ-008: every decision also enters the hash-chained audit log.
+      const recordDecision = () =>
+        audit.record(principal, 'verification.decided', { type: 'verification', id: event.id }, {
+          decision: event.decision,
+          reasonCode: event.reasons[0].code,
+          businessId: event.businessId,
+          agentId: event.agentId,
+          operatorId: event.operatorId,
+          action: event.action,
+          grantId: event.grantId,
+          credentialId: event.credentialId,
+        });
+      try {
+        await recordDecision();
+      } catch {
+        failClosed();
+      }
+      try {
+        await store.verificationEvents.insert(event);
+      } catch {
+        const wasAllow = event.decision === 'ALLOW';
+        failClosed();
+        // The audit log already says ALLOW: append the final (DENY) outcome, best effort.
+        if (wasAllow) await recordDecision().catch(() => {});
       }
       const response = eventOut(event);
       delete response.businessId;

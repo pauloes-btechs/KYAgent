@@ -9,6 +9,7 @@ export const ID_PREFIX = Object.freeze({
   credential: 'crd',
   apiKey: 'key',
   verification: 'vrf',
+  auditEvent: 'aud',
 });
 
 export const ROLES = Object.freeze(['admin', 'operator', 'business']);
