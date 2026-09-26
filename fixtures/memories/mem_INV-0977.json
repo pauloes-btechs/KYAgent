@@ -1,0 +1,19 @@
+{
+  "_id": "mem_INV-0977",
+  "title": "Rate-limit misconfiguration on reporting bot",
+  "summary": "A reporting bot burst requests after a retry loop misconfiguration. Velocity alert only; no funds moved, no key change. Closed as a false positive. Irrelevant to payment takeover cases.",
+  "status": "VERIFIED",
+  "outcome": "FALSE_POSITIVE",
+  "signals": ["VELOCITY"],
+  "embeddingRef": {
+    "file": "fixtures/embeddings.json",
+    "sha256": "b73d0f9a4d272e54ee771e936e598c566be46df9159327405925ee5f0b4a6ffc"
+  },
+  "recommendedSteps": [],
+  "sourceInvestigationId": "INV-0977",
+  "agentId": null,
+  "principalId": null,
+  "verifiedBy": { "role": "admin", "apiKeyId": null, "ownerId": "usr_analyst_1" },
+  "createdDaysAgo": 90,
+  "verifiedDaysAgo": 89
+}
