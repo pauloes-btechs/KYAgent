@@ -35,6 +35,8 @@ If both are set ⇒ config error. File contents are trimmed of trailing whitespa
 | `SANCTIONS_MODE` | no | `mock` | `mock` \| `off`. Any other value (e.g. `live`) ⇒ treated as `mock` with a startup warning (no live provider in MVP; fail safe, never silently `off`). |
 | `CHAIN_MODE` | no | unset | Read and ignored; blockchain registry is a non-goal. Logged at startup as "ignored". |
 | `LLM_MODE` | no | unset | Read and ignored; no LLM features in MVP. |
+| `EMBEDDINGS_MODE` | no | `fixture` | `fixture` \| `live`. `fixture` = offline lookup by sha256(signalsText) in `fixtures/embeddings.json` (unknown text throws); `live` = Voyage `voyage-3.5-lite`, 1024-d. Any other value ⇒ embedding error (fail closed). |
+| `VOYAGE_API_KEY` | only for `EMBEDDINGS_MODE=live` (secret) | unset | Voyage AI API key. Never logged or returned. |
 
 ## Missing secret behaviour
 
