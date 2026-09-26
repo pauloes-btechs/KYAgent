@@ -1,0 +1,122 @@
+{
+  "$comment": "Binding Atlas Search / Vector Search index definitions (T01 contract freeze). Each entry of `indexes` is passed verbatim to `db.collection(collection).createSearchIndex({ name, type, definition })` by `ensureSearchIndexes()` (src/store/searchIndexes.js, T03), which then polls `listSearchIndexes(name)` until `queryable === true`. These indexes exist only on Atlas (or mongodb-atlas-local); there is no in-memory emulation. M0 budget: 3 search indexes per cluster; two are used here, the third slot is reserved and intentionally undefined. See docs/contracts/mongo-collections.md and investigation-pipeline.md.",
+  "contractVersion": 1,
+  "database": "MONGODB_DB (default kyagent)",
+  "indexes": [
+    {
+      "collection": "sanctions",
+      "name": "sanctions_search",
+      "type": "search",
+      "usedBy": "src/sanctions/screen.js fuzzy name/alias stage ($search). NEVER used for the exact-wallet invariant, which uses the regular B-tree index { 'wallets.address': 1 } via find().",
+      "queryPaths": {
+        "standard": ["name", "aliases"],
+        "phonetic": [{ "value": "name", "multi": "phonetic" }, { "value": "aliases", "multi": "phonetic" }],
+        "wallet": "wallets.address"
+      },
+      "definition": {
+        "analyzer": "lucene.standard",
+        "searchAnalyzer": "lucene.standard",
+        "mappings": {
+          "dynamic": false,
+          "fields": {
+            "name": {
+              "type": "string",
+              "analyzer": "lucene.standard",
+              "searchAnalyzer": "lucene.standard",
+              "multi": {
+                "phonetic": {
+                  "type": "string",
+                  "analyzer": "kya_phonetic",
+                  "searchAnalyzer": "kya_phonetic"
+                }
+              }
+            },
+            "aliases": {
+              "type": "string",
+              "analyzer": "lucene.standard",
+              "searchAnalyzer": "lucene.standard",
+              "multi": {
+                "phonetic": {
+                  "type": "string",
+                  "analyzer": "kya_phonetic",
+                  "searchAnalyzer": "kya_phonetic"
+                }
+              }
+            },
+            "wallets": {
+              "type": "document",
+              "dynamic": false,
+              "fields": {
+                "address": {
+                  "type": "token",
+                  "normalizer": "lowercase"
+                },
+                "chain": {
+                  "type": "token",
+                  "normalizer": "lowercase"
+                }
+              }
+            },
+            "type": {
+              "type": "token",
+              "normalizer": "lowercase"
+            },
+            "programs": {
+              "type": "token"
+            },
+            "datasetVersion": {
+              "type": "token"
+            }
+          }
+        },
+        "analyzers": [
+          {
+            "name": "kya_phonetic",
+            "charFilters": [],
+            "tokenizer": {
+              "type": "standard"
+            },
+            "tokenFilters": [
+              {
+                "type": "icuFolding"
+              },
+              {
+                "type": "lowercase"
+              },
+              {
+                "type": "daitchMokotoffSoundex",
+                "originalTokens": "include"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "collection": "security_memories",
+      "name": "memory_vector",
+      "type": "vectorSearch",
+      "usedBy": "src/memory/retrieve.js ($vectorSearch with filter { status: 'VERIFIED' }). numDimensions MUST equal the embedding model output (voyage-3.5-lite, 1024) and every fixture vector length.",
+      "definition": {
+        "fields": [
+          {
+            "type": "vector",
+            "path": "embedding",
+            "numDimensions": 1024,
+            "similarity": "cosine"
+          },
+          {
+            "type": "filter",
+            "path": "status"
+          }
+        ]
+      }
+    }
+  ],
+  "reserved": [
+    {
+      "slot": 3,
+      "note": "Spare M0 slot. Not created. Any future third index must be added here first (contract change) and must not replace the two definitions above."
+    }
+  ]
+}
