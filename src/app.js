@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RESOURCE_ID_RE } from './contracts.js';
 import { jwks } from './crypto/credentials.js';
-import { ApiError, validationError } from './errors.js';
+import { ApiError, toApiError, validationError } from './errors.js';
 import { newId } from './ids.js';
 import { createLogger } from './logger.js';
 import { agentService } from './services/agents.js';
@@ -82,28 +82,42 @@ function parseJson(raw) {
   }
 }
 
-function parseQuery(url, spec = {}) {
-  const out = { limit: 50, cursor: null };
-  const limit = url.searchParams.get('limit');
-  if (limit !== null) {
-    if (!/^\d{1,3}$/.test(limit) || Number(limit) < 1 || Number(limit) > 100) {
-      throw validationError([{ path: '/query/limit', message: 'must be an integer between 1 and 100' }], 'Query is invalid');
-    }
-    out.limit = Number(limit);
+/**
+ * Strict query parsing: only `limit`, `cursor` (list routes) and the route's declared filters are
+ * accepted, each at most once. All problems are reported together as VALIDATION_ERROR details.
+ */
+function parseQuery(url, spec, paginated) {
+  const out = paginated ? { limit: 50, cursor: null } : {};
+  const details = [];
+  const bad = (name, message) => details.push({ path: `/query/${name}`, message });
+  const seen = new Set();
+  for (const name of url.searchParams.keys()) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const known = Object.hasOwn(spec, name) || (paginated && (name === 'limit' || name === 'cursor'));
+    if (!known) bad(name, 'is not a supported query parameter');
+    else if (url.searchParams.getAll(name).length > 1) bad(name, 'must not be repeated');
   }
-  const cursor = url.searchParams.get('cursor');
-  if (cursor !== null) {
-    out.cursor = decodeCursor(cursor);
-    if (!out.cursor) throw validationError([{ path: '/query/cursor', message: 'is invalid' }], 'Query is invalid');
+  if (paginated) {
+    const limit = url.searchParams.get('limit');
+    if (limit !== null) {
+      if (!/^\d{1,3}$/.test(limit) || Number(limit) < 1 || Number(limit) > 100) bad('limit', 'must be an integer between 1 and 100');
+      else out.limit = Number(limit);
+    }
+    const cursor = url.searchParams.get('cursor');
+    if (cursor !== null) {
+      out.cursor = decodeCursor(cursor);
+      if (!out.cursor) bad('cursor', 'is invalid');
+    }
   }
   for (const [name, rule] of Object.entries(spec)) {
     const v = url.searchParams.get(name);
     if (v === null) continue;
-    if ((rule.enum && !rule.enum.includes(v)) || (rule.max && v.length > rule.max)) {
-      throw validationError([{ path: `/query/${name}`, message: 'is invalid' }], 'Query is invalid');
-    }
-    out[name] = v;
+    if (rule.enum && !rule.enum.includes(v)) bad(name, `must be one of ${rule.enum.join(', ')}`);
+    else if (rule.max && (v.length === 0 || v.length > rule.max)) bad(name, `must be 1-${rule.max} characters`);
+    else out[name] = v;
   }
+  if (details.length) throw validationError(details, 'Query is invalid');
   return out;
 }
 
@@ -269,7 +283,8 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
       if (id !== undefined && !RESOURCE_ID_RE.test(id)) {
         throw validationError([{ path: '/params/id', message: 'must be a resource id' }], 'Path parameter is invalid');
       }
-      const query = parseQuery(url, route.query);
+      // GET collection routes (no :id) are paginated; every other route accepts no query parameters.
+      const query = parseQuery(url, route.query ?? {}, route.m === 'GET' && id === undefined);
       let body;
       if (tooLarge) throw new ApiError('PAYLOAD_TOO_LARGE');
       if (route.body === 'json') {
@@ -281,9 +296,10 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
       const result = await route.h({ principal, id, query, body, requestId });
       return send(res, route.status ?? 200, result, requestId, route.noStore ? { 'Cache-Control': 'no-store' } : {});
     } catch (err) {
-      if (err instanceof ApiError) return sendError(res, err, requestId);
-      logger.error('unhandled error', { requestId, error: err?.message, stack: err?.stack });
-      return sendError(res, new ApiError('INTERNAL_ERROR'), requestId);
+      const apiErr = toApiError(err);
+      if (apiErr !== err) logger.error('unhandled error', { requestId, error: err?.message, stack: err?.stack });
+      if (res.headersSent) return res.end();
+      return sendError(res, apiErr, requestId);
     } finally {
       logger.info('request', { requestId, method: req.method, path: pathname, status: res.statusCode, ms: Date.now() - started });
     }
@@ -291,8 +307,9 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
 
   const server = http.createServer((req, res) => {
     handle(req, res).catch(() => {
-      if (!res.headersSent) res.writeHead(500);
-      res.end();
+      if (res.headersSent) return res.end();
+      const requestId = newId('req');
+      return sendError(res, new ApiError('INTERNAL_ERROR'), requestId);
     });
   });
 
