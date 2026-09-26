@@ -1,6 +1,5 @@
-// MongoDB Store (data-schema.md). Requires the optional `mongodb` driver:
-//   npm install mongodb
-// The driver is imported lazily so the default (in-memory) setup has zero dependencies.
+// MongoDB Store (data-schema.md, mongo-collections.md). The `mongodb` driver is a declared
+// dependency; it is imported lazily so MemoryStore-only unit tests never load it.
 import { ConflictError } from '../errors.js';
 import { runMigrations } from './migrations.js';
 import { encodeCursor } from './pagination.js';
@@ -53,11 +52,67 @@ function repo(col, timeField = 'createdAt') {
   };
 }
 
+// Plain CRUD over the investigation-harness collections (mongo-collections.md §3). Search,
+// vector and change-stream access is built on `store.db` by the owning modules.
+function harnessRepo(col, timeField) {
+  const base = repo(col, timeField);
+  return {
+    ...base,
+    /** Conditional `$set` plus an optional `$push` (e.g. `statusHistory`) in the same atomic update. */
+    async updateIf(id, fromStatuses, patch, push) {
+      if (!push) return base.updateIf(id, fromStatuses, patch);
+      const q = { _id: id };
+      if (fromStatuses) q.status = { $in: fromStatuses };
+      const res = await col.findOneAndUpdate(q, { $set: patch, $push: push }, { returnDocument: 'after', includeResultMetadata: false });
+      const doc = res && Object.prototype.hasOwnProperty.call(res, 'value') && Object.prototype.hasOwnProperty.call(res, 'ok') ? res.value : res;
+      return fromDoc(doc);
+    },
+    find: async (filter = {}, { sort = { _id: 1 }, limit = 1000 } = {}) =>
+      (await col.find(filter).sort(sort).limit(limit).toArray()).map(fromDoc),
+    upsert: async (d) => {
+      const { _id, ...rest } = toDoc(d);
+      await col.replaceOne({ _id }, rest, { upsert: true });
+      return d;
+    },
+  };
+}
+
+// NamespaceNotFound: the probe collection is missing but $listSearchIndexes itself is supported.
+const SEARCH_PROBE_OK_CODES = new Set([26]);
+
+/**
+ * Atlas feature detection. Change streams need a replica set (`hello.setName`) or mongos;
+ * Atlas Search / Vector Search need a `listSearchIndexes` probe that the server accepts.
+ */
+export async function detectCapabilities(db, probeCollection = 'operators') {
+  let changeStreams = false;
+  try {
+    const hello = await db.admin().command({ hello: 1 });
+    changeStreams = typeof hello.setName === 'string' || hello.msg === 'isdbgrid';
+  } catch {
+    changeStreams = false;
+  }
+  let atlasSearch = false;
+  try {
+    await db.collection(probeCollection).listSearchIndexes().toArray();
+    atlasSearch = true;
+  } catch (err) {
+    atlasSearch = SEARCH_PROBE_OK_CODES.has(err?.code);
+  }
+  return Object.freeze({ atlasSearch, changeStreams });
+}
+
 export class MongoStore {
   constructor(uri, dbName) {
     this.kind = 'mongo';
     this._uri = uri;
     this._dbName = dbName;
+    this.capabilities = Object.freeze({ atlasSearch: false, changeStreams: false });
+  }
+
+  /** The connected driver `Db`, for the Search / Vector Search / Change Stream modules. */
+  get db() {
+    return this._db;
   }
 
   async init() {
@@ -65,7 +120,7 @@ export class MongoStore {
     try {
       mongodb = await import('mongodb');
     } catch {
-      throw new Error('MONGODB_URI is set but the "mongodb" package is not installed (run: npm install mongodb)');
+      throw new Error('MONGODB_URI is set but the "mongodb" package is not installed (run: npm ci)');
     }
     this._client = new mongodb.MongoClient(this._uri, { serverSelectionTimeoutMS: 5000 });
     await this._client.connect();
@@ -76,6 +131,7 @@ export class MongoStore {
     // Schema (indexes, unique constraints) is owned by versioned migrations;
     // pending ones are applied on startup so the API never runs without them.
     this.migrations = await runMigrations(db);
+    this.capabilities = await detectCapabilities(db);
 
     const apiKeys = repo(c('api_keys'));
     this.apiKeys = {
@@ -132,6 +188,24 @@ export class MongoStore {
         (await auditCol.find({ seq: { $gte: fromSeq } }).sort({ seq: 1 }).limit(limit).toArray()).map(fromDoc),
       list: audit.list,
     };
+
+    // Investigation harness collections (mongo-collections.md §3).
+    this.transactions = harnessRepo(c('transactions'), 'at');
+    const sanctionsCol = c('sanctions');
+    this.sanctions = {
+      ...harnessRepo(sanctionsCol, 'updatedAt'),
+      /** Exact, index-backed wallet match (the sanctions invariant); not Atlas Search. */
+      findByWallet: async (address) =>
+        (await sanctionsCol.find({ 'wallets.address': address }).sort({ _id: 1 }).toArray()).map(fromDoc),
+    };
+    this.sanctionsUpdates = harnessRepo(c('sanctions_updates'), 'stagedAt');
+    this.investigations = harnessRepo(c('investigations'));
+    this.securityMemories = harnessRepo(c('security_memories'));
+    this.passports = harnessRepo(c('passports'), 'issuedAt');
+    this.receipts = harnessRepo(c('receipts'), 'issuedAt');
+    this.harnessVersions = harnessRepo(c('harness_versions'));
+    this.harnessEvents = harnessRepo(c('harness_events'), 'at');
+    this.watcherState = harnessRepo(c('watcher_state'), 'updatedAt');
   }
 
   async ping() {

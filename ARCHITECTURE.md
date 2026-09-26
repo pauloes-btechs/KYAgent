@@ -16,6 +16,8 @@ implementation workers. Do not diverge from it without an architecture change.
 | Error model + verification reason codes | [`docs/contracts/error-model.md`](docs/contracts/error-model.md) |
 | Cryptography: request signing, credentials, API keys | [`docs/contracts/crypto-and-signing.md`](docs/contracts/crypto-and-signing.md) |
 | Environment configuration | [`docs/contracts/environment.md`](docs/contracts/environment.md), [`.env.example`](.env.example) |
+| Investigation harness (§9): collections, Search/Vector indexes, pipeline | [`docs/contracts/mongo-collections.md`](docs/contracts/mongo-collections.md), [`docs/contracts/search-indexes.json`](docs/contracts/search-indexes.json), [`docs/contracts/investigation-pipeline.md`](docs/contracts/investigation-pipeline.md) |
+| Invariants + adaptive harness, decisions, passports, receipts (§9) | [`docs/contracts/harness.md`](docs/contracts/harness.md), [`docs/contracts/decision-vocabulary.md`](docs/contracts/decision-vocabulary.md), [`docs/contracts/passport.md`](docs/contracts/passport.md), [`docs/contracts/receipt.schema.json`](docs/contracts/receipt.schema.json) |
 
 ---
 
@@ -235,3 +237,94 @@ unauthenticated traffic, agent key rotation (revoke and re-register instead).
 | REQ-011 secrets from env/secret store | `environment.md`, `*_FILE` support, production fail-fast |
 | REQ-012 deny by default | §3 algorithm, `INTERNAL_ERROR` ⇒ DENY |
 | REQ-016 rate limiting | `src/rateLimit.js`, `error-model.md` §4, `KYA_RATE_LIMIT_*` |
+
+## 9. Investigation harness
+
+Architecture delta for the MongoDB "Recursive Harnessing" track (frozen by T01; plan and task
+DAG in `DELIVERY_PLAN.md`, requirement classification in `MONGODB_HACKATHON_GAP_ANALYSIS.md`,
+both binding). It **extends** §1–§8; nothing above changes. In particular `POST /v1/verify`
+remains byte-compatible (`decision: ALLOW|DENY`, `REASON_CODES`), and `operators`, `grants`
+and `credentials` are not renamed.
+
+### 9.1 What changes
+
+KYAgent becomes an agent-risk **investigation harness** in which MongoDB Atlas is the
+mechanism, not an optional adapter:
+
+| Capability | MongoDB feature | Contract |
+|---|---|---|
+| Operational state (principals, delegations, transactions, investigations, passports, receipts, harness versions) | Atlas collections + `$jsonSchema` validators | [`mongo-collections.md`](docs/contracts/mongo-collections.md) |
+| Sanctions screening (exact wallet ⇒ deterministic BLOCK; fuzzy/phonetic names ⇒ evidence) | B-tree `find` on `sanctions.wallets.address` + Atlas Search `sanctions_search` | [`search-indexes.json`](docs/contracts/search-indexes.json), [`investigation-pipeline.md`](docs/contracts/investigation-pipeline.md) §4 |
+| Verified security memory as precedent | Atlas Vector Search `memory_vector` with `filter: { status: 'VERIFIED' }` | same |
+| Behavioural signals | aggregation (`$group`, `$percentile`) over `transactions` | same |
+| Continuous KYA (re-screen on sanctions change) | Change Streams on `sanctions`, resume token in `watcher_state` | [`investigation-pipeline.md`](docs/contracts/investigation-pipeline.md) §7, [`passport.md`](docs/contracts/passport.md) |
+| Adaptive harness bounded by immutable invariants | versioned `harness_versions` / `harness_events` documents | [`harness.md`](docs/contracts/harness.md) |
+
+Alias layer (no renames): **principal := operator** (`principals` read-only view over
+`operators`), **delegation := grant** (additive fields `asset`, `approvedWallet`, `maxTxAmount`,
+`dailyLimit`, `permittedTools`, `validFrom`, `version`), **passport := `passports` document +
+credential JWS as carrier**, receipts notarised by the existing hash-chained `audit_events`.
+
+### 9.2 Pipeline
+
+```
+identity -> delegation -> sanctions -> signals -> memory -> [adaptive steps] -> policy -> decision
+   |            |             |            |          |              |              |          |
+verify()     authz.js     find + $search  aggregate  $vectorSearch  harness vN    invariants  RiskDecision
+(§3, reused) + INV_*                                  (VERIFIED)     steps         + escalation  + receipt
+```
+
+Every stage returns `{ name, engine, status, startedAt, durationMs, result, evidence[], reasons[] }`.
+The run is fail closed exactly like `verify()`: any stage error, Atlas error or non-queryable
+index ⇒ `BLOCK / INTERNAL_ERROR`. Triggers: `api` (`POST /v1/investigations`), `sanctions_change`
+(watcher), `manual`. Full contract: [`investigation-pipeline.md`](docs/contracts/investigation-pipeline.md).
+
+### 9.3 Decisions
+
+`RiskDecision = ALLOW | REVIEW | BLOCK` with `RISK_REASON_CODES`, precedence `BLOCK > REVIEW >
+ALLOW`, lives only on investigations and receipts. Identity `DENY` ⇒ `BLOCK`. Invariants are the
+only source of `BLOCK` besides identity, passport state and failures; adaptive policy and memory
+can only add `REVIEW`. Full mapping: [`decision-vocabulary.md`](docs/contracts/decision-vocabulary.md).
+
+### 9.4 Immutable invariants vs adaptive policy
+
+Immutable (code, frozen, hashed as `INVARIANTS_HASH`): `INV_SANCTIONS_EXACT_BLOCK`,
+`INV_DELEGATION_MAX` (+ `INV_DAILY_LIMIT`), `INV_NO_SELF_APPROVAL`,
+`INV_NO_SELF_PASSPORT_MODIFICATION`, `INV_UNVERIFIED_MEMORY_NOT_PRECEDENT`. Adaptive (MongoDB,
+versioned): steps, memory retrieval size/threshold, context assembly, evidence requests,
+`REVIEW` escalations — schema-validated, cannot reference invariants. A new harness version is
+created only by `POST /v1/investigations/{id}/confirm` with an admin's explicit
+`approveAdaptation: true`, and persists old version, new version, diff, evidence, timestamp and
+approver (`harness_versions` + `harness_events` + audit `harness.adapted`). The LLM
+(`LLM_MODE=live`) may only propose a JSON Patch; it never decides and never sees or edits
+invariants. Full contract: [`harness.md`](docs/contracts/harness.md).
+
+### 9.5 New endpoints and RBAC
+
+Frozen in `openapi.yaml` under `x-planned-paths`; each implementing task moves its entry into
+`paths` together with the route (keeps `docs.test.js` exact).
+
+| Endpoint | admin | operator | business | Task |
+|---|---|---|---|---|
+| `POST /v1/investigations` | ✔ | — | ✔ | T08 |
+| `GET /v1/investigations`, `GET /v1/investigations/{id}` | ✔ | own agents | own | T08 |
+| `GET /v1/investigations/{id}/receipt` | ✔ | own agents | own | T15 |
+| `POST /v1/investigations/{id}/confirm` | ✔ (not self: `INV_NO_SELF_APPROVAL`) | — | — | T13 |
+| `GET /v1/passports/{id}` (agent id) | ✔ | own | public view | T10 |
+| `POST /v1/passports/{id}/transitions` | ✔ | — (`INV_NO_SELF_PASSPORT_MODIFICATION`) | — | T10 |
+| `GET /v1/harness/versions`, `GET /v1/harness/events` | ✔ | — | ✔ | T13 |
+| `GET /v1/events/stream` (SSE) | ✔ | — | — | T11 |
+| `POST /v1/demo/{id}/run` (dev only) | ✔ | — | — | T08 |
+
+### 9.6 Runtime rules
+
+- The demo (`make demo`, `npm run demo`) requires `MONGODB_URI` and refuses to start without it;
+  there is no in-memory substitution. `MemoryStore` stays for the legacy unit tests only; its
+  `$search` / `$vectorSearch` / `watch()` throw `AtlasRequiredError`.
+- `SANCTIONS_MODE`, `CHAIN_MODE`, `LLM_MODE`, `EMBEDDINGS_MODE` ∈ `live | fixture`, default
+  `fixture`, working offline from Atlas-loaded fixture data. Fixture ≠ in-memory.
+- Atlas acceptance tests live in `test/atlas/*.test.js` and run only when `ATLAS_TEST_URI` is
+  set (reported as skipped otherwise). `npm test` keeps the 131 legacy tests green.
+- Search/Vector indexes are created only from `search-indexes.json` by `ensureSearchIndexes()`,
+  which waits until `queryable`. The exact-sanctions invariant never depends on `$search`.
+- `MONGODB_URI` / `ATLAS_TEST_URI` are never logged.
