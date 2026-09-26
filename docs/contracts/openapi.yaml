@@ -366,6 +366,29 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
 
+  /v1/agents/{id}/trust-score:
+    get:
+      tags: [agents]
+      operationId: getAgentTrustScore
+      x-roles: [admin, operator(own), business]
+      description: >-
+        REQ-019. Explainable, rule-based trust score (rules `kya-trust-v1`), computed from
+        current state on every call: operator verification level (35), agent age (20),
+        revocation history (25) and scope breadth of active grants (20). A non-active agent
+        or non-verified operator is gated to score 0 / `untrusted`. Only aggregate counts are
+        returned (no other tenants' ids). Advisory only — never an authorization decision;
+        use `POST /v1/verify`.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Trust score with per-factor explanation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrustScore' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
   /v1/agents/{id}/suspend:
     post:
       tags: [agents]
@@ -944,6 +967,30 @@ components:
         createdAt: { $ref: '#/components/schemas/IsoDateTime' }
         updatedAt: { $ref: '#/components/schemas/IsoDateTime' }
         revokedAt: { type: [string, 'null'], format: date-time }
+    TrustFactor:
+      type: object
+      required: [code, label, points, maxPoints, detail, inputs]
+      properties:
+        code: { type: string, enum: [operator_verification, agent_age, revocation_history, scope_breadth] }
+        label: { type: string }
+        points: { type: integer, minimum: 0 }
+        maxPoints: { type: integer }
+        detail: { type: string }
+        inputs: { type: object, description: Aggregate rule inputs (counts, statuses) }
+    TrustScore:
+      type: object
+      required: [agentId, operatorId, rulesVersion, score, maxScore, level, gates, factors, computedAt, advisory]
+      properties:
+        agentId: { $ref: '#/components/schemas/ResourceId' }
+        operatorId: { $ref: '#/components/schemas/ResourceId' }
+        rulesVersion: { type: string, const: kya-trust-v1 }
+        score: { type: integer, minimum: 0, maximum: 100 }
+        maxScore: { type: integer, const: 100 }
+        level: { type: string, enum: [high, medium, low, untrusted] }
+        gates: { type: array, items: { type: string }, description: Hard-gate failures; non-empty ⇒ score 0 }
+        factors: { type: array, items: { $ref: '#/components/schemas/TrustFactor' } }
+        computedAt: { $ref: '#/components/schemas/IsoDateTime' }
+        advisory: { type: string }
     CreateAgentRequest:
       type: object
       additionalProperties: false
