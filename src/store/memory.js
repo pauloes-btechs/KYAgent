@@ -76,7 +76,14 @@ function harnessRepo(opts) {
     insert: (d) => col.insert(d),
     findById: (id) => col.findById(id),
     list: (q) => col.list(q),
-    updateIf: (id, fromStatuses, patch) => col.updateIf(id, fromStatuses, patch),
+    /** Conditional `$set` (+ optional `$push` of `{ field: value }`), atomic within this process. */
+    updateIf: async (id, fromStatuses, patch, push) => {
+      const doc = col.docs.get(id);
+      if (!doc || (fromStatuses && !fromStatuses.includes(doc.status))) return null;
+      Object.assign(doc, clone(patch));
+      for (const [k, v] of Object.entries(push ?? {})) doc[k] = [...(doc[k] ?? []), clone(v)];
+      return clone(doc);
+    },
     find: async (filter = {}, { limit = 1000 } = {}) =>
       [...col.docs.values()]
         .filter((d) => Object.entries(filter).every(([k, v]) => d[k] === v))

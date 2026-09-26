@@ -125,6 +125,29 @@ function scopeFactor({ activeGrants, truncated }) {
   return { code: 'scope_breadth', label: 'Scope breadth', points, maxPoints: max, detail, inputs };
 }
 
+/** Passport statuses that hard-gate the score (blocked / terminal, passport.md §2). */
+const PASSPORT_GATING = new Set(['SUSPENDED', 'REVOKED']);
+
+/**
+ * Sanctions exposure from the agent's passport (the continuously re-screened trust state).
+ * Carries no points (the four scored factors keep maxScore 100); a SUSPENDED or REVOKED
+ * passport is a hard gate, REVIEW / RE_SCREENING are reported but not scored.
+ */
+function sanctionsExposureFactor(passport) {
+  const inputs = {
+    passportId: passport.id ?? null,
+    passportStatus: passport.status ?? null,
+    statusReason: passport.statusReason ?? null,
+    sanctionsDatasetVersion: passport.sanctionsDatasetVersion ?? null,
+    lastInvestigationId: passport.lastInvestigationId ?? null,
+  };
+  const detail =
+    passport.status === 'ACTIVE'
+      ? `Passport ACTIVE; last sanctions screen against dataset ${inputs.sanctionsDatasetVersion ?? 'unknown'}.`
+      : `Passport ${passport.status}${inputs.statusReason ? ` (${inputs.statusReason})` : ''}; dataset ${inputs.sanctionsDatasetVersion ?? 'unknown'}.`;
+  return { code: 'sanctions_exposure', label: 'Sanctions exposure (passport)', points: 0, maxPoints: 0, detail, inputs };
+}
+
 /**
  * Pure scoring. Inputs are store documents (Dates) plus pre-counted history.
  * Hard gates mirror verify checks 4–5: a non-active agent or non-verified operator
@@ -138,6 +161,7 @@ export function scoreAgent({
   revokedCredentials = 0,
   siblingRevokedOrSuspended = 0,
   truncated = { grants: false, history: false },
+  passport = null,
   now,
 }) {
   const factors = [
@@ -146,9 +170,11 @@ export function scoreAgent({
     revocationFactor({ agent, revokedGrants, revokedCredentials, siblingRevokedOrSuspended, truncated: truncated.history }),
     scopeFactor({ activeGrants, truncated: truncated.grants }),
   ];
+  if (passport) factors.push(sanctionsExposureFactor(passport));
   const gates = [];
   if (agent.status !== 'active') gates.push(`Agent is ${agent.status}.`);
   if (!operator || operator.status !== 'verified') gates.push(`Operator is ${operator?.status ?? 'missing'}.`);
+  if (passport && PASSPORT_GATING.has(passport.status)) gates.push(`Passport is ${passport.status}.`);
   const gated = gates.length > 0;
   const raw = factors.reduce((sum, f) => sum + f.points, 0);
   const score = gated ? 0 : raw;
@@ -195,6 +221,7 @@ export function trustService({ store, clock }) {
         collect(store.agents, { operatorId: agent.operatorId, status: 'revoked' }),
         collect(store.agents, { operatorId: agent.operatorId, status: 'suspended' }),
       ]);
+      const passport = store.passports ? ((await store.passports.find({ agentId: agent.id }, { limit: 1 }))[0] ?? null) : null;
       const siblings = [...revSiblings.docs, ...susSiblings.docs].filter((a) => a.id !== agent.id).length;
       return scoreAgent({
         agent,
@@ -207,6 +234,7 @@ export function trustService({ store, clock }) {
           grants: active.truncated,
           history: revGrants.truncated || revCreds.truncated || revSiblings.truncated || susSiblings.truncated,
         },
+        passport,
         now,
       });
     },
