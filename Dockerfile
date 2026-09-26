@@ -9,6 +9,8 @@ COPY src ./src
 COPY scripts ./scripts
 COPY dashboard ./dashboard
 COPY docs ./docs
+# Offline fixture embeddings (EMBEDDINGS_MODE=fixture).
+COPY fixtures ./fixtures
 USER node
 EXPOSE 8080
 CMD ["node", "src/server.js"]
