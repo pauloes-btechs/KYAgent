@@ -7,6 +7,7 @@ import { loadConfig } from '../src/config.js';
 import { signCredential } from '../src/crypto/credentials.js';
 import { b64u, keyThumbprint } from '../src/crypto/ed25519.js';
 import { buildVerifyRequest, generateAgentKey } from '../src/sdk/agentSigner.js';
+import { auditService } from '../src/services/audit.js';
 import { verificationService } from '../src/services/verification.js';
 import { MemoryStore } from '../src/store/memory.js';
 
@@ -47,7 +48,7 @@ async function setup({ grant = {}, operatorStatus = 'verified', agentStatus = 'a
     ...grant,
   });
 
-  const svc = verificationService({ store, clock, config });
+  const svc = verificationService({ store, clock, config, audit: auditService({ store, clock }) });
   const principal = { role: 'business', businessId: BIZ };
   const signed = (o = {}) =>
     buildVerifyRequest(o.privateKey ?? key.privateKey, {
@@ -164,7 +165,13 @@ test('REQ-014 unit [tampered]: unsigned body fields disagreeing with signed fiel
     assert.equal(code(await s.run(b)), 'MALFORMED_REQUEST', m.toString());
   }
   // unparsable body (parser reported failure)
-  const r = await verificationService({ store: s.store, clock: { now: () => new Date() }, config: s.config }).verify(
+  const wallClock = { now: () => new Date() };
+  const r = await verificationService({
+    store: s.store,
+    clock: wallClock,
+    config: s.config,
+    audit: auditService({ store: s.store, clock: wallClock }),
+  }).verify(
     { role: 'business', businessId: BIZ },
     { ok: false },
     'r',
