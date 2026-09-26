@@ -1,0 +1,332 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "$description": "KYAgent dashboard design tokens (MVP). Security-console aesthetic: neutral slate surfaces, one accent, semantic colors reserved for decisions and lifecycle status. No gradients, no decorative imagery. All foreground/background pairs listed under 'contrastPairs' meet WCAG 2.2 AA (>= 4.5:1 text, >= 3:1 non-text).",
+  "meta": {
+    "name": "kyagent",
+    "version": "1.0.0",
+    "themes": ["light", "dark"],
+    "defaultTheme": "light",
+    "cssVariablePrefix": "--kya-"
+  },
+  "color": {
+    "palette": {
+      "slate": {
+        "0": { "$type": "color", "$value": "#FFFFFF" },
+        "25": { "$type": "color", "$value": "#F8FAFC" },
+        "50": { "$type": "color", "$value": "#F1F5F9" },
+        "100": { "$type": "color", "$value": "#E2E8F0" },
+        "200": { "$type": "color", "$value": "#CBD5E1" },
+        "400": { "$type": "color", "$value": "#64748B" },
+        "500": { "$type": "color", "$value": "#475569" },
+        "700": { "$type": "color", "$value": "#1E293B" },
+        "800": { "$type": "color", "$value": "#162032" },
+        "900": { "$type": "color", "$value": "#0F172A" },
+        "950": { "$type": "color", "$value": "#0A0F1C" }
+      },
+      "indigo": {
+        "100": { "$type": "color", "$value": "#E0E7FF" },
+        "300": { "$type": "color", "$value": "#A5B4FC" },
+        "600": { "$type": "color", "$value": "#4F46E5" },
+        "700": { "$type": "color", "$value": "#4338CA" }
+      },
+      "green": {
+        "100": { "$type": "color", "$value": "#DCFCE7" },
+        "300": { "$type": "color", "$value": "#86EFAC" },
+        "700": { "$type": "color", "$value": "#15803D" },
+        "900": { "$type": "color", "$value": "#14532D" }
+      },
+      "red": {
+        "100": { "$type": "color", "$value": "#FEE2E2" },
+        "300": { "$type": "color", "$value": "#FCA5A5" },
+        "700": { "$type": "color", "$value": "#B91C1C" },
+        "900": { "$type": "color", "$value": "#7F1D1D" }
+      },
+      "amber": {
+        "100": { "$type": "color", "$value": "#FEF3C7" },
+        "300": { "$type": "color", "$value": "#FCD34D" },
+        "800": { "$type": "color", "$value": "#92400E" },
+        "900": { "$type": "color", "$value": "#78350F" }
+      },
+      "sky": {
+        "100": { "$type": "color", "$value": "#E0F2FE" },
+        "300": { "$type": "color", "$value": "#7DD3FC" },
+        "800": { "$type": "color", "$value": "#075985" }
+      }
+    },
+    "light": {
+      "bg": {
+        "canvas": { "$type": "color", "$value": "{color.palette.slate.25}", "$description": "App background" },
+        "surface": { "$type": "color", "$value": "{color.palette.slate.0}", "$description": "Tables, panels, drawers" },
+        "subtle": { "$type": "color", "$value": "{color.palette.slate.50}", "$description": "Table header, code blocks, zebra rows" },
+        "nav": { "$type": "color", "$value": "{color.palette.slate.900}", "$description": "Left navigation rail" },
+        "navActive": { "$type": "color", "$value": "{color.palette.slate.700}" },
+        "overlay": { "$type": "color", "$value": "rgba(15, 23, 42, 0.56)", "$description": "Modal scrim" }
+      },
+      "fg": {
+        "default": { "$type": "color", "$value": "{color.palette.slate.900}" },
+        "muted": { "$type": "color", "$value": "{color.palette.slate.500}", "$description": "Secondary text; 7.5:1 on surface" },
+        "onNav": { "$type": "color", "$value": "{color.palette.slate.100}" },
+        "onNavMuted": { "$type": "color", "$value": "{color.palette.slate.200}" },
+        "onAccent": { "$type": "color", "$value": "{color.palette.slate.0}" },
+        "link": { "$type": "color", "$value": "{color.palette.indigo.700}" }
+      },
+      "border": {
+        "default": { "$type": "color", "$value": "{color.palette.slate.100}" },
+        "strong": { "$type": "color", "$value": "{color.palette.slate.400}", "$description": "Form field borders; 3:1+ non-text contrast" },
+        "focus": { "$type": "color", "$value": "{color.palette.indigo.600}" }
+      },
+      "accent": {
+        "default": { "$type": "color", "$value": "{color.palette.indigo.600}", "$description": "Primary buttons, selected tab indicator" },
+        "hover": { "$type": "color", "$value": "{color.palette.indigo.700}" },
+        "subtle": { "$type": "color", "$value": "{color.palette.indigo.100}" }
+      },
+      "decision": {
+        "allow": {
+          "fg": { "$type": "color", "$value": "{color.palette.green.900}" },
+          "bg": { "$type": "color", "$value": "{color.palette.green.100}" },
+          "border": { "$type": "color", "$value": "{color.palette.green.700}" }
+        },
+        "deny": {
+          "fg": { "$type": "color", "$value": "{color.palette.red.900}" },
+          "bg": { "$type": "color", "$value": "{color.palette.red.100}" },
+          "border": { "$type": "color", "$value": "{color.palette.red.700}" }
+        }
+      },
+      "status": {
+        "positive": {
+          "$description": "active (agent/grant/credential/key/business), verified (operator), clear (sanctions), pass (kyc)",
+          "fg": { "$type": "color", "$value": "{color.palette.green.900}" },
+          "bg": { "$type": "color", "$value": "{color.palette.green.100}" }
+        },
+        "pending": {
+          "$description": "pending (operator), not-yet-valid",
+          "fg": { "$type": "color", "$value": "{color.palette.sky.800}" },
+          "bg": { "$type": "color", "$value": "{color.palette.sky.100}" }
+        },
+        "warning": {
+          "$description": "suspended (reversible), expiring soon (< 24h), sanctions skipped",
+          "fg": { "$type": "color", "$value": "{color.palette.amber.900}" },
+          "bg": { "$type": "color", "$value": "{color.palette.amber.100}" }
+        },
+        "critical": {
+          "$description": "revoked (irreversible), rejected, sanctions hit, kyc fail",
+          "fg": { "$type": "color", "$value": "{color.palette.red.900}" },
+          "bg": { "$type": "color", "$value": "{color.palette.red.100}" }
+        },
+        "neutral": {
+          "$description": "expired, unknown, n/a",
+          "fg": { "$type": "color", "$value": "{color.palette.slate.700}" },
+          "bg": { "$type": "color", "$value": "{color.palette.slate.100}" }
+        }
+      },
+      "danger": {
+        "default": { "$type": "color", "$value": "{color.palette.red.700}", "$description": "Destructive button fill (Revoke)" },
+        "hover": { "$type": "color", "$value": "{color.palette.red.900}" }
+      },
+      "secret": {
+        "bg": { "$type": "color", "$value": "{color.palette.amber.100}", "$description": "One-time secret reveal panel" },
+        "border": { "$type": "color", "$value": "{color.palette.amber.800}" },
+        "fg": { "$type": "color", "$value": "{color.palette.amber.900}" }
+      }
+    },
+    "dark": {
+      "bg": {
+        "canvas": { "$type": "color", "$value": "{color.palette.slate.950}" },
+        "surface": { "$type": "color", "$value": "{color.palette.slate.900}" },
+        "subtle": { "$type": "color", "$value": "{color.palette.slate.800}" },
+        "nav": { "$type": "color", "$value": "{color.palette.slate.950}" },
+        "navActive": { "$type": "color", "$value": "{color.palette.slate.700}" },
+        "overlay": { "$type": "color", "$value": "rgba(0, 0, 0, 0.64)" }
+      },
+      "fg": {
+        "default": { "$type": "color", "$value": "{color.palette.slate.50}" },
+        "muted": { "$type": "color", "$value": "{color.palette.slate.200}" },
+        "onNav": { "$type": "color", "$value": "{color.palette.slate.100}" },
+        "onNavMuted": { "$type": "color", "$value": "{color.palette.slate.200}" },
+        "onAccent": { "$type": "color", "$value": "{color.palette.slate.0}" },
+        "link": { "$type": "color", "$value": "{color.palette.indigo.300}" }
+      },
+      "border": {
+        "default": { "$type": "color", "$value": "{color.palette.slate.700}" },
+        "strong": { "$type": "color", "$value": "{color.palette.slate.400}" },
+        "focus": { "$type": "color", "$value": "{color.palette.indigo.300}" }
+      },
+      "accent": {
+        "default": { "$type": "color", "$value": "{color.palette.indigo.600}" },
+        "hover": { "$type": "color", "$value": "{color.palette.indigo.700}" },
+        "subtle": { "$type": "color", "$value": "{color.palette.slate.700}" }
+      },
+      "decision": {
+        "allow": {
+          "fg": { "$type": "color", "$value": "{color.palette.green.300}" },
+          "bg": { "$type": "color", "$value": "{color.palette.green.900}" },
+          "border": { "$type": "color", "$value": "{color.palette.green.300}" }
+        },
+        "deny": {
+          "fg": { "$type": "color", "$value": "{color.palette.red.300}" },
+          "bg": { "$type": "color", "$value": "{color.palette.red.900}" },
+          "border": { "$type": "color", "$value": "{color.palette.red.300}" }
+        }
+      },
+      "status": {
+        "positive": {
+          "fg": { "$type": "color", "$value": "{color.palette.green.300}" },
+          "bg": { "$type": "color", "$value": "{color.palette.green.900}" }
+        },
+        "pending": {
+          "fg": { "$type": "color", "$value": "{color.palette.sky.300}" },
+          "bg": { "$type": "color", "$value": "{color.palette.slate.700}" }
+        },
+        "warning": {
+          "fg": { "$type": "color", "$value": "{color.palette.amber.300}" },
+          "bg": { "$type": "color", "$value": "{color.palette.amber.900}" }
+        },
+        "critical": {
+          "fg": { "$type": "color", "$value": "{color.palette.red.300}" },
+          "bg": { "$type": "color", "$value": "{color.palette.red.900}" }
+        },
+        "neutral": {
+          "fg": { "$type": "color", "$value": "{color.palette.slate.100}" },
+          "bg": { "$type": "color", "$value": "{color.palette.slate.700}" }
+        }
+      },
+      "danger": {
+        "default": { "$type": "color", "$value": "{color.palette.red.700}" },
+        "hover": { "$type": "color", "$value": "{color.palette.red.900}" }
+      },
+      "secret": {
+        "bg": { "$type": "color", "$value": "{color.palette.amber.900}" },
+        "border": { "$type": "color", "$value": "{color.palette.amber.300}" },
+        "fg": { "$type": "color", "$value": "{color.palette.amber.100}" }
+      }
+    },
+    "contrastPairs": {
+      "$description": "Pairs the implementation must verify (automated a11y test). Minimum ratios per WCAG 2.2 AA.",
+      "pairs": [
+        { "fg": "light.fg.default", "bg": "light.bg.surface", "min": 4.5 },
+        { "fg": "light.fg.muted", "bg": "light.bg.surface", "min": 4.5 },
+        { "fg": "light.fg.muted", "bg": "light.bg.subtle", "min": 4.5 },
+        { "fg": "light.fg.onNav", "bg": "light.bg.nav", "min": 4.5 },
+        { "fg": "light.fg.onAccent", "bg": "light.accent.default", "min": 4.5 },
+        { "fg": "light.fg.onAccent", "bg": "light.danger.default", "min": 4.5 },
+        { "fg": "light.decision.allow.fg", "bg": "light.decision.allow.bg", "min": 4.5 },
+        { "fg": "light.decision.deny.fg", "bg": "light.decision.deny.bg", "min": 4.5 },
+        { "fg": "light.status.warning.fg", "bg": "light.status.warning.bg", "min": 4.5 },
+        { "fg": "light.status.pending.fg", "bg": "light.status.pending.bg", "min": 4.5 },
+        { "fg": "light.border.strong", "bg": "light.bg.surface", "min": 3 },
+        { "fg": "light.border.focus", "bg": "light.bg.surface", "min": 3 },
+        { "fg": "dark.fg.default", "bg": "dark.bg.surface", "min": 4.5 },
+        { "fg": "dark.fg.muted", "bg": "dark.bg.surface", "min": 4.5 },
+        { "fg": "dark.decision.allow.fg", "bg": "dark.decision.allow.bg", "min": 4.5 },
+        { "fg": "dark.decision.deny.fg", "bg": "dark.decision.deny.bg", "min": 4.5 },
+        { "fg": "dark.border.focus", "bg": "dark.bg.surface", "min": 3 }
+      ]
+    }
+  },
+  "typography": {
+    "fontFamily": {
+      "sans": { "$type": "fontFamily", "$value": ["Inter", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"] },
+      "mono": { "$type": "fontFamily", "$value": ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"], "$description": "IDs (agt_, op_, grt_...), public keys, thumbprints, action patterns, reason codes, JSON" }
+    },
+    "fontWeight": {
+      "regular": { "$type": "fontWeight", "$value": 400 },
+      "medium": { "$type": "fontWeight", "$value": 500 },
+      "semibold": { "$type": "fontWeight", "$value": 600 }
+    },
+    "scale": {
+      "display": { "$type": "typography", "$value": { "fontFamily": "{typography.fontFamily.sans}", "fontSize": "24px", "lineHeight": "32px", "fontWeight": 600, "letterSpacing": "-0.01em" }, "$description": "Page title (h1)" },
+      "heading": { "$type": "typography", "$value": { "fontFamily": "{typography.fontFamily.sans}", "fontSize": "18px", "lineHeight": "26px", "fontWeight": 600 }, "$description": "Section title (h2)" },
+      "subheading": { "$type": "typography", "$value": { "fontFamily": "{typography.fontFamily.sans}", "fontSize": "15px", "lineHeight": "22px", "fontWeight": 600 }, "$description": "Panel/drawer title (h3)" },
+      "body": { "$type": "typography", "$value": { "fontFamily": "{typography.fontFamily.sans}", "fontSize": "14px", "lineHeight": "20px", "fontWeight": 400 } },
+      "bodyStrong": { "$type": "typography", "$value": { "fontFamily": "{typography.fontFamily.sans}", "fontSize": "14px", "lineHeight": "20px", "fontWeight": 500 } },
+      "caption": { "$type": "typography", "$value": { "fontFamily": "{typography.fontFamily.sans}", "fontSize": "12px", "lineHeight": "16px", "fontWeight": 500 }, "$description": "Table headers (uppercase, 0.04em tracking), field labels, timestamps" },
+      "code": { "$type": "typography", "$value": { "fontFamily": "{typography.fontFamily.mono}", "fontSize": "13px", "lineHeight": "20px", "fontWeight": 400 } },
+      "codeSmall": { "$type": "typography", "$value": { "fontFamily": "{typography.fontFamily.mono}", "fontSize": "12px", "lineHeight": "16px", "fontWeight": 500 }, "$description": "Reason codes inside badges" },
+      "decision": { "$type": "typography", "$value": { "fontFamily": "{typography.fontFamily.mono}", "fontSize": "13px", "lineHeight": "16px", "fontWeight": 600, "letterSpacing": "0.06em" }, "$description": "ALLOW / DENY stamps" }
+    }
+  },
+  "space": {
+    "$description": "4px base grid",
+    "0": { "$type": "dimension", "$value": "0px" },
+    "1": { "$type": "dimension", "$value": "4px" },
+    "2": { "$type": "dimension", "$value": "8px" },
+    "3": { "$type": "dimension", "$value": "12px" },
+    "4": { "$type": "dimension", "$value": "16px" },
+    "5": { "$type": "dimension", "$value": "20px" },
+    "6": { "$type": "dimension", "$value": "24px" },
+    "8": { "$type": "dimension", "$value": "32px" },
+    "10": { "$type": "dimension", "$value": "40px" },
+    "12": { "$type": "dimension", "$value": "48px" }
+  },
+  "size": {
+    "navRail": { "$type": "dimension", "$value": "232px" },
+    "navRailCollapsed": { "$type": "dimension", "$value": "64px" },
+    "topBar": { "$type": "dimension", "$value": "56px" },
+    "contentMax": { "$type": "dimension", "$value": "1280px" },
+    "drawer": { "$type": "dimension", "$value": "480px" },
+    "modalSm": { "$type": "dimension", "$value": "440px" },
+    "modalMd": { "$type": "dimension", "$value": "600px" },
+    "tableRow": { "$type": "dimension", "$value": "44px" },
+    "tableRowCompact": { "$type": "dimension", "$value": "36px" },
+    "control": { "$type": "dimension", "$value": "36px" },
+    "touchTarget": { "$type": "dimension", "$value": "44px", "$description": "Minimum hit area below the md breakpoint" },
+    "iconSm": { "$type": "dimension", "$value": "16px" },
+    "iconMd": { "$type": "dimension", "$value": "20px" },
+    "focusRing": { "$type": "dimension", "$value": "2px" },
+    "focusRingOffset": { "$type": "dimension", "$value": "2px" }
+  },
+  "radius": {
+    "none": { "$type": "dimension", "$value": "0px" },
+    "sm": { "$type": "dimension", "$value": "4px", "$description": "Badges, inputs, buttons" },
+    "md": { "$type": "dimension", "$value": "6px", "$description": "Panels, drawers, modals" },
+    "full": { "$type": "dimension", "$value": "9999px", "$description": "Status dot only" }
+  },
+  "borderWidth": {
+    "default": { "$type": "dimension", "$value": "1px" },
+    "emphasis": { "$type": "dimension", "$value": "2px", "$description": "Decision stamp border, secret panel, selected row left edge" }
+  },
+  "shadow": {
+    "$description": "Used only for overlays (drawer, modal, menu, toast). Panels are flat with borders.",
+    "overlay": { "$type": "shadow", "$value": { "offsetX": "0px", "offsetY": "8px", "blur": "24px", "spread": "0px", "color": "rgba(15, 23, 42, 0.18)" } },
+    "menu": { "$type": "shadow", "$value": { "offsetX": "0px", "offsetY": "2px", "blur": "8px", "spread": "0px", "color": "rgba(15, 23, 42, 0.14)" } }
+  },
+  "motion": {
+    "$description": "All durations collapse to 0ms under prefers-reduced-motion: reduce.",
+    "duration": {
+      "instant": { "$type": "duration", "$value": "0ms" },
+      "fast": { "$type": "duration", "$value": "120ms", "$description": "Hover, focus, badge change" },
+      "base": { "$type": "duration", "$value": "200ms", "$description": "Drawer/modal enter" },
+      "slow": { "$type": "duration", "$value": "280ms", "$description": "Drawer/modal exit" }
+    },
+    "easing": {
+      "standard": { "$type": "cubicBezier", "$value": [0.2, 0, 0, 1] },
+      "exit": { "$type": "cubicBezier", "$value": [0.4, 0, 1, 1] }
+    }
+  },
+  "breakpoint": {
+    "sm": { "$type": "dimension", "$value": "640px", "$description": "< sm: single column, nav in off-canvas sheet, tables become stacked row cards" },
+    "md": { "$type": "dimension", "$value": "900px", "$description": "sm..md: collapsed icon rail, drawers become full-screen sheets" },
+    "lg": { "$type": "dimension", "$value": "1200px", "$description": ">= lg: full nav rail, drawers overlay beside table" },
+    "xl": { "$type": "dimension", "$value": "1440px" }
+  },
+  "zIndex": {
+    "nav": { "$type": "number", "$value": 10 },
+    "topBar": { "$type": "number", "$value": 20 },
+    "drawer": { "$type": "number", "$value": 30 },
+    "modal": { "$type": "number", "$value": 40 },
+    "toast": { "$type": "number", "$value": 50 },
+    "tooltip": { "$type": "number", "$value": 60 }
+  },
+  "semanticMapping": {
+    "$description": "Canonical mapping from contract enum values (docs/contracts/types.ts) to status token groups. Badges MUST use this map; never pick colors ad hoc.",
+    "OperatorStatus": { "pending": "pending", "verified": "positive", "rejected": "critical", "suspended": "warning" },
+    "AgentStatus": { "active": "positive", "suspended": "warning", "revoked": "critical" },
+    "GrantStatus": { "active": "positive", "revoked": "critical", "expired(derived)": "neutral" },
+    "CredentialStatus": { "active": "positive", "revoked": "critical", "expired(derived)": "neutral" },
+    "ApiKeyStatus": { "active": "positive", "revoked": "critical" },
+    "BusinessStatus": { "active": "positive", "suspended": "warning" },
+    "KycResult": { "pass": "positive", "fail": "critical" },
+    "SanctionsResult": { "clear": "positive", "hit": "critical", "skipped": "warning" },
+    "Decision": { "ALLOW": "decision.allow", "DENY": "decision.deny" }
+  }
+}
