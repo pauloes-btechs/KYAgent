@@ -1,0 +1,19 @@
+{
+  "_id": "mem_INV-1042",
+  "title": "Treasury agent account takeover",
+  "summary": "A treasury agent's signing key was rotated outside the change window, then the agent attempted a near-ceiling USDC payment to a never-seen counterparty. Confirmed as an account takeover; the attacker controlled the rotated key.",
+  "status": "VERIFIED",
+  "outcome": "CONFIRMED_ACCOUNT_TAKEOVER",
+  "signals": ["SIGNING_KEY_CHANGED", "NEW_COUNTERPARTY", "AMOUNT_ANOMALY", "NEAR_CEILING"],
+  "embeddingRef": {
+    "file": "fixtures/embeddings.json",
+    "sha256": "1c345766d7cef7e2d725e32f827d8eb04cf26e4bcbb2a459a29f8e1ca56a65ee"
+  },
+  "recommendedSteps": ["signing_key_history_check"],
+  "sourceInvestigationId": "INV-1042",
+  "agentId": null,
+  "principalId": null,
+  "verifiedBy": { "role": "admin", "apiKeyId": null, "ownerId": "usr_analyst_1" },
+  "createdDaysAgo": 40,
+  "verifiedDaysAgo": 38
+}

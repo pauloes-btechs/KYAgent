@@ -13,6 +13,8 @@
     "start": "node src/server.js",
     "dev": "node src/server.js",
     "demo": "node scripts/demo.js",
+    "demo:reset": "node scripts/demo-reset.js",
+    "demo:seed": "node scripts/demo-seed.js",
     "example:sdk": "node examples/sdk-quickstart.js",
     "test": "node --test",
     "test:atlas": "node --test test/atlas/",
