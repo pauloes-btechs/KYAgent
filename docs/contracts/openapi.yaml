@@ -866,6 +866,28 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
 
+  /v1/events/stream:
+    get:
+      tags: [events]
+      operationId: streamEvents
+      x-roles: [admin]
+      x-implemented-by: T11
+      description: |
+        Server-Sent Events feed (text/event-stream) of `sanctions.change_detected`, `passport.status_changed`,
+        `investigation.decided` and `harness.adapted` (types.ts HarnessStreamEvent). Each SSE `event:` is the type,
+        `data:` the JSON object. Keep-alive comment every 15 s. Not rate-limited per event; one stream per key.
+        Also emits the Demo 4 progress steps `change_detected`, `affected_agent`, `rescreen_started` and
+        `passport_suspended` (same framing). A newer stream for the same key closes the older one; 503 when too many streams are open.
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+
 components:
   securitySchemes:
     apiKey:
@@ -1742,24 +1764,6 @@ x-planned-paths:
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
-  /v1/events/stream:
-    get:
-      tags: [events]
-      operationId: streamEvents
-      x-roles: [admin]
-      x-implemented-by: T11
-      description: |
-        Server-Sent Events feed (text/event-stream) of `sanctions.change_detected`, `passport.status_changed`,
-        `investigation.decided` and `harness.adapted` (types.ts HarnessStreamEvent). Each SSE `event:` is the type,
-        `data:` the JSON object. Keep-alive comment every 15 s. Not rate-limited per event; one stream per key.
-      responses:
-        '200':
-          description: Event stream
-          content:
-            text/event-stream:
-              schema: { type: string }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
   /v1/demo/{id}/run:
     post:
       tags: [demo]

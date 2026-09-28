@@ -12,6 +12,10 @@
 // - memory is Atlas `$vectorSearch` (src/memory/retrieve.js); only VERIFIED hits >= minScore are
 //   kept. A kept CONFIRMED_ACCOUNT_TAKEOVER precedent can only add REVIEW (precedent, never proof).
 // - fail closed: any stage throwing ⇒ that stage `error`, the rest `skipped`, BLOCK INTERNAL_ERROR.
+// - trigger `sanctions_change` (watcher re-screen, investigation-pipeline.md §2): there is no
+//   candidate amount, so INV_DELEGATION_MAX, the amount-based signals and the memory lookup keyed
+//   on them are recorded `not_applicable`. Gated on the trigger only: any other trigger with a
+//   missing amount still fails the invariant and the signals stage.
 // Nothing is persisted here; the investigations service (T08) stores the returned document.
 import { ADAPTIVE_STEPS, holds, precedentMemories } from '../harness/invariants.js';
 import { retrieveMemories } from '../memory/retrieve.js';
@@ -91,11 +95,11 @@ function identityStage({ agent, operator, agentId, signed = null }) {
   };
 }
 
-function delegationStage({ grant, agentId, tx, now }) {
+function delegationStage({ grant, agentId, tx, now, amountApplicable = true }) {
   const wallet = tx.wallet;
   const asset = tx.asset ?? tx.currency ?? null;
   const active = Boolean(grant) && grant.agentId === agentId && grant.status === 'active' && new Date(grant.expiresAt) > now;
-  const withinMax = active && holds('INV_DELEGATION_MAX', { constraints: grant.constraints, resource: tx.resource, context: { amount: tx.amount, currency: asset } });
+  const withinMax = !amountApplicable ? 'not_applicable' : active && holds('INV_DELEGATION_MAX', { constraints: grant.constraints, resource: tx.resource, context: { amount: tx.amount, currency: asset } });
   const walletApproved = active && (grant.approvedWallet == null || grant.approvedWallet === wallet);
   const assetPermitted = active && (grant.asset == null || grant.asset === asset);
   const reasons = [];
@@ -104,7 +108,7 @@ function delegationStage({ grant, agentId, tx, now }) {
     reasonCode = !grant ? 'NO_GRANT' : grant.status === 'revoked' ? 'GRANT_REVOKED' : grant.status === 'active' && grant.agentId === agentId ? 'GRANT_EXPIRED' : 'NO_GRANT';
     reasons.push(reason('DELEGATION_DENIED', 'BLOCK', 'delegation', { identityReasonCode: reasonCode }));
   } else {
-    if (!withinMax) {
+    if (withinMax === false) {
       reasonCode = 'CONSTRAINT_VIOLATION';
       reasons.push(reason('DELEGATION_MAX_EXCEEDED', 'BLOCK', 'delegation', { invariantId: 'INV_DELEGATION_MAX', identityReasonCode: reasonCode }));
     }
@@ -120,7 +124,7 @@ function delegationStage({ grant, agentId, tx, now }) {
       approvedWallet: grant?.approvedWallet ?? null,
       maxTxAmount: grant?.maxTxAmount ?? grant?.constraints?.maxAmount ?? null,
       dailyLimit: grant?.dailyLimit ?? null,
-      amount: tx.amount,
+      amount: tx.amount ?? null,
       withinMax,
       walletApproved,
       assetPermitted,
@@ -170,6 +174,9 @@ export async function runInvestigation({
 }) {
   const stages = [];
   const ctx = { signals: [], memory: null, sanctions: null, halted: false };
+  // Keyed on the trigger, never on a missing amount (see the header comment).
+  const rescreen = trigger === 'sanctions_change';
+  const notApplicable = (why) => ({ status: 'skipped', result: { notApplicable: true, reason: why }, evidence: [], reasons: [] });
 
   const run = async (name, engine, fn) => {
     const startedAt = new Date();
@@ -212,7 +219,7 @@ export async function runInvestigation({
 
   await run('delegation', 'find', async () => {
     grant = delegationId ? await store.grants.findById(delegationId) : null;
-    return delegationStage({ grant, agentId, tx: payment(), now });
+    return delegationStage({ grant, agentId, tx: payment(), now, amountApplicable: !rescreen });
   });
 
   await run('sanctions', store.db ? '$search' : 'find', async () => {
@@ -243,12 +250,14 @@ export async function runInvestigation({
   });
 
   await run('signals', store.db ? 'aggregate' : 'js', async () => {
+    if (rescreen) return notApplicable('sanctions_change re-screen has no candidate payment');
     const r = await computeSignals({ store, agent, grant, tx: payment(), now });
     ctx.signals = r.signals;
     return { status: r.signals.length ? 'flagged' : 'passed', result: { signals: r.signals, stats: r.stats }, evidence: r.evidence, reasons: [] };
   });
 
   await run('memory', '$vectorSearch', async () => {
+    if (rescreen) return notApplicable('sanctions_change re-screen has no behavioral signals to match');
     const { k, numCandidates, minScorePpm } = policy.memoryRetrieval;
     const r = await retrieveMemories({ db: store.db, signals: ctx.signals, k, numCandidates, minScorePpm });
     const { evidence, ...result } = r;

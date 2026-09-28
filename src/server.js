@@ -4,6 +4,7 @@ import { ConfigError, loadConfig } from './config.js';
 import { createLogger } from './logger.js';
 import { MemoryStore } from './store/memory.js';
 import { MongoStore } from './store/mongo.js';
+import { SanctionsWatcher } from './watchers/sanctionsWatcher.js';
 
 async function main() {
   let config;
@@ -31,7 +32,27 @@ async function main() {
   const addr = await app.listen();
   logger.info('KYAgent listening', { port: addr.port, store: store.kind, dashboard: `http://localhost:${addr.port}/dashboard/` });
 
-  const shutdown = () => app.close().finally(() => process.exit(0));
+  // Continuous KYA (investigation-pipeline.md §7): only where change streams exist (Atlas).
+  let watcher = null;
+  if (store.capabilities?.changeStreams) {
+    watcher = new SanctionsWatcher({ store, audit: app.services.audit, events: app.events, logger });
+    try {
+      await watcher.start();
+      logger.info('sanctions watcher started');
+    } catch (err) {
+      logger.fatal('sanctions watcher failed to start', { error: err.message });
+      await app.close().catch(() => {});
+      process.exit(1);
+    }
+  } else {
+    logger.warn('sanctions watcher disabled: store has no change streams', { store: store.kind });
+  }
+
+  const shutdown = () =>
+    (watcher ? watcher.stop() : Promise.resolve())
+      .catch(() => {})
+      .then(() => app.close())
+      .finally(() => process.exit(0));
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 }
