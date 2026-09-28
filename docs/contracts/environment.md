@@ -34,7 +34,7 @@ If both are set ⇒ config error. File contents are trimmed of trailing whitespa
 | `KYA_RATE_LIMIT_REGISTER_PER_WINDOW` | no | `30` | Registration calls (`POST /v1/agents`, `/v1/operators`, `/v1/businesses`) per tenant per window |
 | `SANCTIONS_MODE` | no | `mock` | `mock` \| `off`. Any other value (e.g. `live`) ⇒ treated as `mock` with a startup warning (no live provider in MVP; fail safe, never silently `off`). |
 | `CHAIN_MODE` | no | unset | Read and ignored; blockchain registry is a non-goal. Logged at startup as "ignored". |
-| `LLM_MODE` | no | unset | Read and ignored; no LLM features in MVP. |
+| `LLM_MODE` | no | unset (= `fixture`) | Harness adaptation proposer (harness.md §6). `fixture`: deterministic template diff, offline. `live`: an injected LLM client (`buildApp({ llm })`) proposes a JSON Patch that is schema-validated like any proposal; without a client the proposal is recorded as `adaptation.rejected`. Never called inside an investigation run. |
 | `EMBEDDINGS_MODE` | no | `fixture` | `fixture` \| `live`. `fixture` = offline lookup by sha256(signalsText) in `fixtures/embeddings.json` (unknown text throws); `live` = Voyage `voyage-3.5-lite`, 1024-d. Any other value ⇒ embedding error (fail closed). |
 | `VOYAGE_API_KEY` | only for `EMBEDDINGS_MODE=live` (secret) | unset | Voyage AI API key. Never logged or returned. |
 

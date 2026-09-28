@@ -1,5 +1,6 @@
-// Investigation pipeline — T07 skeleton (investigation-pipeline.md; T14 adds sanctions, policy
-// and adaptive steps). Stage order here: identity -> delegation -> signals -> memory -> decision.
+// Investigation pipeline — T07 skeleton (investigation-pipeline.md; T14 adds the sanctions and
+// policy stages). Stage order here: identity -> delegation -> signals -> memory ->
+// [adaptive steps of the active harness policy, T13] -> decision.
 //
 // - identity runs in `state` mode (agent active, operator verified); DENY short-circuits every
 //   later stage to `skipped` with BLOCK IDENTITY_DENIED.
@@ -8,8 +9,9 @@
 //   kept. A kept CONFIRMED_ACCOUNT_TAKEOVER precedent can only add REVIEW (precedent, never proof).
 // - fail closed: any stage throwing ⇒ that stage `error`, the rest `skipped`, BLOCK INTERNAL_ERROR.
 // Nothing is persisted here; the investigations service (T08) stores the returned document.
-import { holds, precedentMemories } from '../harness/invariants.js';
+import { ADAPTIVE_STEPS, holds, precedentMemories } from '../harness/invariants.js';
 import { retrieveMemories } from '../memory/retrieve.js';
+import { ADAPTIVE_STEP_RUNNERS } from './adaptiveSteps.js';
 import { computeSignals } from './signals.js';
 
 export const SKELETON_STAGES = Object.freeze(['identity', 'delegation', 'signals', 'memory', 'decision']);
@@ -34,6 +36,7 @@ const MESSAGES = {
   WALLET_NOT_APPROVED: 'Source wallet is not the delegation-approved wallet.',
   ASSET_NOT_PERMITTED: 'Asset is not permitted by the delegation.',
   MEMORY_PRECEDENT_TAKEOVER: 'A VERIFIED account-takeover precedent matches this case.',
+  HARNESS_INVARIANTS_MISMATCH: 'The active harness version was created under different invariants.',
   INTERNAL_ERROR: 'An investigation stage failed; failing closed.',
 };
 
@@ -155,6 +158,7 @@ export async function runInvestigation({
   trigger = 'manual',
   now = new Date(),
   signedIdentity = null,
+  invariantsMatch = true,
 }) {
   const stages = [];
   const ctx = { signals: [], memory: null, halted: false };
@@ -208,7 +212,8 @@ export async function runInvestigation({
   });
 
   await run('memory', '$vectorSearch', async () => {
-    const r = await retrieveMemories({ db: store.db, signals: ctx.signals, ...policy.memoryRetrieval });
+    const { k, numCandidates, minScorePpm } = policy.memoryRetrieval;
+    const r = await retrieveMemories({ db: store.db, signals: ctx.signals, k, numCandidates, minScorePpm });
     const { evidence, ...result } = r;
     ctx.memory = result;
     const precedents = precedentMemories(result.hits);
@@ -223,7 +228,18 @@ export async function runInvestigation({
     return { status: result.hits.length ? 'flagged' : 'passed', result, evidence, reasons };
   });
 
+  // Adaptive steps (harness.md §3.3): only registered steps, in policy order, between memory and
+  // the decision. They add evidence only (runners return no reasons).
+  for (const step of (policy.steps ?? []).filter((x) => ADAPTIVE_STEPS.includes(x))) {
+    const runner = Object.hasOwn(ADAPTIVE_STEP_RUNNERS, step) ? ADAPTIVE_STEP_RUNNERS[step] : null;
+    await run(step, runner?.engine ?? 'code', async () => {
+      if (!runner) throw new Error(`adaptive step ${step} has no runner`);
+      return runner.run({ store, agent, agentId, now, signals: ctx.signals, memory: ctx.memory });
+    });
+  }
+
   const collected = stages.flatMap((s) => s.reasons);
+  if (!invariantsMatch) collected.push(reason('HARNESS_INVARIANTS_MISMATCH', 'BLOCK', 'decision'));
   const verdict = decide(collected);
   stages.push({
     name: 'decision',

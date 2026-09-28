@@ -789,6 +789,82 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Investigation' }
         '503': { $ref: '#/components/responses/Error' }
+  /v1/investigations/{id}/confirm:
+    post:
+      tags: [investigations]
+      operationId: confirmInvestigation
+      x-roles: [admin]
+      x-implemented-by: T13
+      description: |
+        Human confirmation of an investigation outcome (harness.md §6). Promotes the case memory
+        (UNVERIFIED -> VERIFIED, or -> REJECTED for CLEAN) and, when `approveAdaptation` is true, persists the
+        validated adaptive-policy proposal as a new harness version plus a harness_events entry.
+        INV_NO_SELF_APPROVAL: 403 when the confirming key initiated the investigation or owns its agent,
+        principal or business. 409 INVALID_STATE when already confirmed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/HarnessId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfirmInvestigationRequest' }
+      responses:
+        '200':
+          description: Outcome recorded; memory and harness effects
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfirmInvestigationResponse' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /v1/harness/versions:
+    get:
+      tags: [harness]
+      operationId: listHarnessVersions
+      x-roles: [admin, business]
+      x-implemented-by: T13
+      description: All harness versions, newest first; exactly one has status `active`.
+      responses:
+        '200':
+          description: Harness versions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, invariantsHash]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/HarnessVersion' } }
+                  invariantsHash: { type: string, pattern: '^[0-9a-f]{64}$', description: Runtime INVARIANTS_HASH }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /v1/harness/events:
+    get:
+      tags: [harness]
+      operationId: listHarnessEvents
+      x-roles: [admin, business]
+      x-implemented-by: T13
+      description: Harness adaptation events (old/new policy, diff, evidence, approval, timestamp), newest first.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Page of harness events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/HarnessEvent' } }
+                  nextCursor: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
 
 components:
   securitySchemes:
@@ -1612,39 +1688,6 @@ x-planned-paths:
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
-  /v1/investigations/{id}/confirm:
-    post:
-      tags: [investigations]
-      operationId: confirmInvestigation
-      x-roles: [admin]
-      x-implemented-by: T13
-      description: |
-        Human confirmation of an investigation outcome (harness.md §6). Promotes the case memory
-        (UNVERIFIED -> VERIFIED, or -> REJECTED for CLEAN) and, when `approveAdaptation` is true, persists the
-        validated adaptive-policy proposal as a new harness version plus a harness_events entry.
-        INV_NO_SELF_APPROVAL: 403 when the confirming key initiated the investigation or owns its agent,
-        principal or business. 409 INVALID_STATE when already confirmed.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { $ref: '#/components/schemas/HarnessId' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ConfirmInvestigationRequest' }
-      responses:
-        '200':
-          description: Outcome recorded; memory and harness effects
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ConfirmInvestigationResponse' }
-        '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
   /v1/passports/{id}:
     get:
       tags: [passports]
@@ -1699,49 +1742,6 @@ x-planned-paths:
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
-  /v1/harness/versions:
-    get:
-      tags: [harness]
-      operationId: listHarnessVersions
-      x-roles: [admin, business]
-      x-implemented-by: T13
-      description: All harness versions, newest first; exactly one has status `active`.
-      responses:
-        '200':
-          description: Harness versions
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data, invariantsHash]
-                properties:
-                  data: { type: array, items: { $ref: '#/components/schemas/HarnessVersion' } }
-                  invariantsHash: { type: string, pattern: '^[0-9a-f]{64}$', description: Runtime INVARIANTS_HASH }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-  /v1/harness/events:
-    get:
-      tags: [harness]
-      operationId: listHarnessEvents
-      x-roles: [admin, business]
-      x-implemented-by: T13
-      description: Harness adaptation events (old/new policy, diff, evidence, approval, timestamp), newest first.
-      parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Cursor'
-      responses:
-        '200':
-          description: Page of harness events
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data, nextCursor]
-                properties:
-                  data: { type: array, items: { $ref: '#/components/schemas/HarnessEvent' } }
-                  nextCursor: { type: [string, 'null'] }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
   /v1/events/stream:
     get:
       tags: [events]
