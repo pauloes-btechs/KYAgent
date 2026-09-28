@@ -822,6 +822,31 @@ paths:
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
+  /v1/investigations/{id}/receipt:
+    get:
+      tags: [investigations]
+      operationId: getInvestigationReceipt
+      x-roles: [admin, operator(own agents), business(own)]
+      x-implemented-by: T15
+      description: Compliance receipt (receipt.schema.json) including `receiptHash` and its `receipt.issued` audit anchor.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/HarnessId' }
+      responses:
+        '200':
+          description: Receipt
+          headers:
+            X-KYA-Receipt-Integrity:
+              description: "`valid` when receiptHash equals sha256(canonicalJson(receipt without receiptHash/anchor)) and the anchoring `receipt.issued` audit event notarises that hash; `mismatch` otherwise (the stored receipt is returned verbatim, never repaired)."
+              schema: { type: string, enum: [valid, mismatch] }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
   /v1/harness/versions:
     get:
       tags: [harness]
@@ -1715,27 +1740,6 @@ x-planned-paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Investigation' }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
-  /v1/investigations/{id}/receipt:
-    get:
-      tags: [investigations]
-      operationId: getInvestigationReceipt
-      x-roles: [admin, operator(own agents), business(own)]
-      x-implemented-by: T15
-      description: Compliance receipt (receipt.schema.json) including `receiptHash` and its `receipt.issued` audit anchor.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { $ref: '#/components/schemas/HarnessId' }
-      responses:
-        '200':
-          description: Receipt
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Receipt' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
