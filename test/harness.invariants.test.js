@@ -60,7 +60,7 @@ test('INVARIANTS array, every element and every check are frozen', () => {
 });
 
 test('INVARIANTS_HASH is the pinned canonical-metadata hash (harness.md §1)', () => {
-  assert.equal(INVARIANTS_HASH, 'b2642f0bed039e1ff2d3421e2c04f630e372ff0c53279bde338a636d03b6b48a');
+  assert.equal(INVARIANTS_HASH, 'f88ecf79577c9d3810e286772d14e0a3124be9b450127cc2859d6d49bac3348d');
 });
 
 test('INVARIANTS_SOURCE_SHA256 is sha256 of the module source', () => {
@@ -152,10 +152,10 @@ test('INV_DAILY_LIMIT breaches when the rolling total exceeds the limit or input
 });
 
 // ------------------------------------------------------------ INV_NO_SELF_APPROVAL
-const CASE = { initiatedBy: { apiKeyId: 'key_initiator' }, agentId: 'agt_1', principalId: 'op_1', businessId: 'biz_1' };
+const CASE = { initiatedBy: { apiKeyId: 'key_initiator' }, agentId: 'agt_1', principalId: 'op_1', businessId: 'biz_1', conflictKeyIds: ['key_initiator', 'key_root1'] };
 
 test('INV_NO_SELF_APPROVAL holds for an independent admin', () => {
-  assert.equal(holds('INV_NO_SELF_APPROVAL', { approver: { role: 'admin', apiKeyId: 'key_admin2', ownerId: null }, subject: CASE }), true);
+  assert.equal(holds('INV_NO_SELF_APPROVAL', { approver: { role: 'admin', apiKeyId: 'key_admin2', ownerId: null, keyLineage: ['key_admin2', 'key_root2'] }, subject: CASE }), true);
 });
 
 test('INV_NO_SELF_APPROVAL breaches for the initiator, a case party, or a non-admin', () => {
