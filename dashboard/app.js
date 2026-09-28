@@ -7,9 +7,10 @@
 //    any error hides data rather than guessing.
 
 import { denyCountsByReason, trustAssessment } from '/dashboard/trust.js';
+import { createSseParser, fromReceipt, kyaStripApply, kyaStripInit, renderInvestigation, renderKyaStrip, riskStamp } from '/dashboard/investigations.js';
 
 const IDLE_MS = 30 * 60 * 1000;
-const state = { key: null, role: null, keyPrefix: null, idleTimer: null };
+const state = { key: null, role: null, keyPrefix: null, idleTimer: null, stream: null, strip: kyaStripInit(), live: [], onLive: null };
 const $ = (id) => document.getElementById(id);
 
 function el(tag, attrs = {}, ...children) {
@@ -21,7 +22,7 @@ function el(tag, attrs = {}, ...children) {
     else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
     else node.setAttribute(k, v === true ? '' : String(v));
   }
-  for (const c of children.flat()) {
+  for (const c of children.flat(Infinity)) {
     if (c === null || c === undefined || c === false) continue;
     node.append(c instanceof Node ? c : document.createTextNode(String(c)));
   }
@@ -41,10 +42,15 @@ class ApiFailure extends Error {
     super(body?.error?.message || `Request failed (${status})`);
     this.status = status;
     this.code = body?.error?.code;
+    this.body = body;
   }
 }
 
 async function api(method, path, body) {
+  return (await apiResponse(method, path, body)).json;
+}
+
+async function apiResponse(method, path, body) {
   if (!state.key) throw new ApiFailure(401);
   const headers = { Authorization: `Bearer ${state.key}` };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -60,7 +66,7 @@ async function api(method, path, body) {
     throw new ApiFailure(401, json);
   }
   if (!res.ok && !(path === '/v1/verify' && json && json.decision)) throw new ApiFailure(res.status, json);
-  return json;
+  return { json, headers: res.headers };
 }
 
 async function probe(path) {
@@ -91,6 +97,7 @@ async function signIn(key) {
   $('shell').hidden = false;
   buildNav();
   bumpIdle();
+  if (role === 'admin') startKyaStream();
   if (!location.hash || !routeFor(location.hash)) location.hash = `#/${navItems()[0].route}`;
   else render();
 }
@@ -99,6 +106,7 @@ function signOut(message) {
   state.key = null;
   state.role = null;
   clearTimeout(state.idleTimer);
+  stopKyaStream();
   $('apikey').value = '';
   $('shell').hidden = true;
   $('signin').hidden = false;
@@ -118,6 +126,7 @@ const NAV = [
   { group: 'Identity', route: 'lookup', label: 'Agent lookup', roles: ['business'], view: lookupView },
   { group: 'Authorization', route: 'grants', label: 'Grants', roles: ['admin', 'operator', 'business'], view: grantsView },
   { group: 'Authorization', route: 'credentials', label: 'Credentials', roles: ['admin', 'operator', 'business'], view: credentialsView },
+  { group: 'Decisions', route: 'investigations', label: 'Investigations', roles: ['admin', 'business'], view: investigationsView },
   { group: 'Decisions', route: 'verifications', label: 'Verifications (audit log)', roles: ['admin', 'business'], view: verificationsView },
   { group: 'Admin', route: 'api-keys', label: 'API keys', roles: ['admin'], view: apiKeysView },
 ];
@@ -148,6 +157,7 @@ function render() {
   $('page-title').textContent = item.label;
   const main = $('content');
   main.replaceChildren();
+  state.onLive = null;
   item.view(main);
 }
 
@@ -630,6 +640,180 @@ function apiKeysView(main) {
         }, 'danger'),
     ],
   });
+}
+
+// ------------------------------------------------------------------ investigations + continuous KYA
+function investigationsView(main) {
+  header(main, 'Investigations', 'Evidence behind a risk decision: current signals, MongoDB security memory retrieved via Vector Search, the harness version that ran, and the decision with its compliance receipt.');
+  const out = el('div', { 'aria-live': 'polite' });
+  const receiptOut = el('div');
+  let versions;
+
+  async function show(inv) {
+    if (versions === undefined) versions = await api('GET', '/v1/harness/versions').then((r) => r.data, () => null);
+    out.replaceChildren(renderInvestigation(el, inv, { versions, onReceipt: openReceipt }));
+    receiptOut.replaceChildren();
+  }
+
+  async function openReceipt(id) {
+    receiptOut.replaceChildren(el('div', { class: 'loading', role: 'status', text: 'Loading receipt…' }));
+    try {
+      const { json, headers } = await apiResponse('GET', `/v1/investigations/${encodeURIComponent(id)}/receipt`);
+      const integrity = headers.get('X-KYA-Receipt-Integrity');
+      receiptOut.replaceChildren(
+        factSheet('Compliance receipt', [
+          ['Receipt', mono(json.receiptId)],
+          ['Receipt hash', mono(json.receiptHash)],
+          ['Integrity', el('span', { class: `stamp ${integrity === 'valid' ? 'ALLOW' : 'DENY'}`, text: integrity === 'valid' ? 'valid' : integrity === 'mismatch' ? 'mismatch' : 'unknown' })],
+          ['Audit anchor', json.anchor ? el('span', {}, mono(json.anchor.auditEventId), ` seq ${json.anchor.auditSeq}`) : '—'],
+          ['Policy version', mono(json.policyVersion)],
+          ['Sanctions dataset', mono(json.sanctionsDatasetVersion)],
+        ]),
+        el('pre', { class: 'json mono', tabindex: 0, 'aria-label': 'Receipt JSON', text: JSON.stringify(json, null, 2) }),
+      );
+      receiptOut.querySelector('h2')?.setAttribute('tabindex', '-1');
+      receiptOut.querySelector('h2')?.focus();
+    } catch (err) {
+      receiptOut.replaceChildren(el('div', { class: 'empty', role: 'alert', text: err.status === 404 || err.status === 400 ? 'No receipt with this investigation id is visible to you.' : `Could not load receipt: ${err.message}` }));
+    }
+  }
+
+  async function loadById(id) {
+    out.replaceChildren(el('div', { class: 'loading', role: 'status', text: 'Loading investigation…' }));
+    try {
+      const { json } = await apiResponse('GET', `/v1/investigations/${encodeURIComponent(id)}/receipt`);
+      await show(fromReceipt(json));
+    } catch (err) {
+      out.replaceChildren(el('div', { class: 'empty', role: 'alert', text: err.status === 404 || err.status === 400 ? 'No investigation with this id is visible to you.' : `Could not load: ${err.message}` }));
+    }
+  }
+
+  const idInput = el('input', { placeholder: 'inv_…', 'aria-label': 'Investigation id', maxlength: 80, class: 'mono', required: true });
+  const byId = el('form', { class: 'filters' }, idInput, el('button', { type: 'submit', class: 'primary', text: 'Load evidence' }));
+  byId.addEventListener('submit', (e) => {
+    e.preventDefault();
+    loadById(idInput.value.trim());
+  });
+
+  // A signed InvestigationRequest produced on the agent host; the dashboard never holds agent keys.
+  const reqInput = el('textarea', { id: 'inv-req', rows: 5, class: 'mono', spellcheck: 'false', placeholder: 'InvestigationRequest JSON: agentId, action, resource, context, signedRequest' });
+  const submit = el(
+    'form',
+    { class: 'stack' },
+    el('label', { for: 'inv-req', text: 'Signed investigation request (JSON, signed on the agent host)' }),
+    reqInput,
+    el('div', {}, el('button', { type: 'submit', class: 'secondary', text: 'Run investigation' })),
+  );
+  submit.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    let body;
+    try {
+      body = JSON.parse(reqInput.value);
+    } catch {
+      out.replaceChildren(el('div', { class: 'empty', role: 'alert', text: 'Request is not valid JSON.' }));
+      return;
+    }
+    out.replaceChildren(el('div', { class: 'loading', role: 'status', text: 'Running investigation pipeline…' }));
+    try {
+      await show(await api('POST', '/v1/investigations', body));
+    } catch (err) {
+      // 500 fail-closed responses still carry a BLOCK investigation body.
+      if (err.body && err.body.riskDecision) await show(err.body);
+      else out.replaceChildren(el('div', { class: 'empty', role: 'alert', text: `Investigation failed: ${err.code ? `${err.code} — ` : ''}${err.message}` }));
+    }
+  });
+
+  main.append(byId, el('details', {}, el('summary', { text: 'Run a new investigation' }), submit));
+
+  if (state.role === 'admin') {
+    const live = el('div');
+    const drawLive = () =>
+      live.replaceChildren(
+        state.live.length
+          ? el(
+              'table',
+              {},
+              el('caption', { class: 'muted', text: 'Decided investigations received on the event stream (this session)' }),
+              el('thead', {}, el('tr', {}, ['At', 'Risk', 'Agent', 'Trigger', 'Investigation', ''].map((c) => el('th', { scope: 'col', text: c })))),
+              el(
+                'tbody',
+                {},
+                state.live.map((d) =>
+                  el(
+                    'tr',
+                    {},
+                    el('td', { text: fmtTime(d.at) }),
+                    el('td', {}, riskStamp(el, d.riskDecision)),
+                    el('td', {}, mono(d.agentId)),
+                    el('td', {}, mono(d.trigger)),
+                    el('td', {}, mono(d.investigationId)),
+                    el('td', {}, el('button', { type: 'button', class: 'secondary', text: 'Open', onclick: () => loadById(d.investigationId) })),
+                  ),
+                ),
+              ),
+            )
+          : el('div', { class: 'empty', text: 'No investigations decided since sign-in. Live events appear here.' }),
+      );
+    state.onLive = drawLive;
+    drawLive();
+    main.append(el('h2', { class: 'section', text: 'Live decisions' }), live);
+  }
+  main.append(out, receiptOut);
+}
+
+function drawStrip(connText) {
+  $('kya-strip').hidden = false;
+  if (connText) $('kya-conn').textContent = connText;
+  $('kya-steps').replaceChildren(renderKyaStrip(el, state.strip));
+}
+
+// Admin only. Uses fetch rather than EventSource, which cannot send the Authorization header.
+function startKyaStream() {
+  stopKyaStream();
+  const ctrl = new AbortController();
+  state.stream = ctrl;
+  drawStrip('Connecting…');
+  const onEvent = (evt) => {
+    state.strip = kyaStripApply(state.strip, evt);
+    if (evt.type === 'investigation.decided') {
+      state.live = [evt.data, ...state.live].slice(0, 20);
+      state.onLive?.();
+    }
+    drawStrip();
+  };
+  (async () => {
+    while (!ctrl.signal.aborted) {
+      try {
+        const res = await fetch('/v1/events/stream', { headers: { Authorization: `Bearer ${state.key}`, Accept: 'text/event-stream' }, cache: 'no-store', credentials: 'omit', signal: ctrl.signal });
+        if (res.status === 401) {
+          signOut('Your API key was rejected. It may have been revoked.');
+          return;
+        }
+        if (!res.ok || !res.body) throw new Error(`stream unavailable (${res.status})`);
+        drawStrip('Live');
+        const push = createSseParser(onEvent);
+        const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          push(value);
+        }
+        throw new Error('stream closed');
+      } catch (err) {
+        if (ctrl.signal.aborted) return;
+        drawStrip(`Disconnected (${err.message}) — retrying in 3 s`);
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    }
+  })();
+}
+
+function stopKyaStream() {
+  state.stream?.abort();
+  state.stream = null;
+  state.strip = kyaStripInit();
+  state.live = [];
+  $('kya-strip').hidden = true;
 }
 
 // ------------------------------------------------------------------ wiring
