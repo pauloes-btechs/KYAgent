@@ -8,6 +8,7 @@
   <img alt="Node" src="https://img.shields.io/badge/node-%E2%89%A5%2020-1C2D38?style=flat-square">
   <img alt="Tests" src="https://img.shields.io/badge/tests-37%20suites%20%C2%B7%209%20on%20Atlas-1C2D38?style=flat-square">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-5C6C75?style=flat-square">
+  <a href="https://kyagent-live.vercel.app"><img alt="Live demo" src="https://img.shields.io/badge/live%20demo-KYAgent%20Console-00ED64?style=flat-square&labelColor=001E2B"></a>
 </p>
 
 <p align="center">
@@ -19,6 +20,8 @@
   <a href="#security-model">Security</a> ·
   <a href="#getting-started">Getting started</a>
 </p>
+
+<p align="center"><b>Live demo:</b> <a href="https://kyagent-live.vercel.app">KYAgent Live Console</a> — screen any wallet or counterparty against the current OFAC SDN list.</p>
 
 ---
 
@@ -255,6 +258,8 @@ A review of the invariant boundary is documented in [`docs/SECURITY_REVIEW_HARNE
 ---
 
 ## Getting started
+
+**Live demo:** [KYAgent Live Console](https://kyagent-live.vercel.app) — screen any wallet or counterparty against the current OFAC SDN list.
 
 ### Prerequisites
 
