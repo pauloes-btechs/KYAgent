@@ -35,7 +35,19 @@ async function main() {
   // Continuous KYA (investigation-pipeline.md §7): only where change streams exist (Atlas).
   let watcher = null;
   if (store.capabilities?.changeStreams) {
-    watcher = new SanctionsWatcher({ store, audit: app.services.audit, events: app.events, logger });
+    // Least privilege (docs/SECURITY_REVIEW_HARNESS.md §3): the watcher runs as a user with
+    // readWrite on the app db only. Refused in production; a loud warning elsewhere.
+    const priv = await store.privileges().catch(() => ({ ok: false, excess: [], authenticated: false }));
+    if (!priv.ok) {
+      const fields = { required: `readWrite@${config.mongoDb}`, excess: priv.excess.map((r) => `${r.role}@${r.db}`), authenticated: priv.authenticated };
+      if (config.production) {
+        logger.fatal('sanctions watcher refused: the MongoDB user is not least-privilege', fields);
+        await app.close().catch(() => {});
+        process.exit(1);
+      }
+      logger.warn('sanctions watcher: the MongoDB user is not least-privilege (refused in production)', fields);
+    }
+    watcher =new SanctionsWatcher({ store, audit: app.services.audit, events: app.events, logger });
     try {
       await watcher.start();
       logger.info('sanctions watcher started');

@@ -20,6 +20,7 @@ import { runInvestigation } from '../investigation/pipeline.js';
 import { embedWithMeta } from '../memory/embeddings.js';
 import { normalizeSignals, signalsText } from '../memory/signalsText.js';
 import { schemas, validate } from '../validate.js';
+import { keyLineage, ownedKeyIds } from './apiKeys.js';
 import { actorOf } from './audit.js';
 import { actionMatches } from './authz.js';
 import { receiptService } from './receipts.js';
@@ -240,6 +241,22 @@ export function investigationService({ store, clock, config, audit, llm = null }
     return { applied: true, eventId, toVersion };
   }
 
+  /**
+   * INV_NO_SELF_APPROVAL input: the approver's key lineage and every key id controlled by whoever
+   * holds the initiator's key or a case party's key. A lineage that cannot be resolved yields an
+   * input the invariant rejects (fail closed).
+   */
+  async function selfApprovalInput(approver, inv) {
+    try {
+      const partyKeys = await ownedKeyIds(store, [inv.agentId, inv.principalId, inv.businessId]);
+      const roots = [inv.initiatedBy?.apiKeyId ?? null, ...partyKeys].filter(Boolean);
+      const conflictKeyIds = [...new Set((await Promise.all(roots.map((k) => keyLineage(store, k)))).flat())];
+      return { approver: { ...approver, keyLineage: await keyLineage(store, approver.apiKeyId) }, subject: { ...inv, conflictKeyIds } };
+    } catch {
+      return { approver, subject: inv };
+    }
+  }
+
   /** Delegation under test: first active grant (createdAt asc) from the business that covers the action. */
   async function delegationFor(agentId, businessId, action, now) {
     if (!businessId) return null;
@@ -373,7 +390,7 @@ export function investigationService({ store, clock, config, audit, llm = null }
       if (!inv) throw new ApiError('NOT_FOUND');
       const req = parseConfirm(body);
       const approver = actorOf(principal);
-      if (!holds('INV_NO_SELF_APPROVAL', { approver, subject: inv })) {
+      if (!holds('INV_NO_SELF_APPROVAL', await selfApprovalInput(approver, inv))) {
         throw new ApiError('FORBIDDEN', 'INV_NO_SELF_APPROVAL: the approver may not confirm its own case');
       }
       if (!CONFIRMABLE.includes(inv.status) || inv.outcome != null) throw new ApiError('INVALID_STATE', 'Investigation is already confirmed');

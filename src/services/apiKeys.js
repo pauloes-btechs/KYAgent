@@ -1,10 +1,13 @@
 import { generateApiKey, hashApiKeySecret, parseApiKey, secretMatches } from '../crypto/apiKeys.js';
 import { ApiError, validationError } from '../errors.js';
+import { decodeCursor } from '../store/pagination.js';
 import { schemas } from '../validate.js';
 import { apiKeyOut, pageOut } from './serialize.js';
 import { ensureValid, invalidState, notFound, pageQuery } from './util.js';
 
 const TOUCH_INTERVAL_MS = 60_000;
+const MAX_LINEAGE_DEPTH = 32;
+const MAX_OWNED_KEYS = 1000;
 const unauthenticated = () => new ApiError('UNAUTHENTICATED', 'Missing or invalid API key');
 
 export function apiKeyService({ store, clock, config, audit }) {
@@ -28,6 +31,8 @@ export function apiKeyService({ store, clock, config, audit }) {
         ownerId,
         secretHash: hashApiKeySecret(config.pepper, secret),
         status: 'active',
+        // Lineage for INV_NO_SELF_APPROVAL: whoever holds the minting key also received this key's secret.
+        createdBy: principal?.apiKeyId ?? null,
         createdAt: clock.now(),
         lastUsedAt: null,
         revokedAt: null,
@@ -101,6 +106,7 @@ export function apiKeyService({ store, clock, config, audit }) {
         ownerId: null,
         secretHash: hashApiKeySecret(config.pepper, parsed.secret),
         status: 'active',
+        createdBy: null, // provisioned out-of-band: a lineage root
         createdAt: clock.now(),
         lastUsedAt: null,
         revokedAt: null,
@@ -108,4 +114,46 @@ export function apiKeyService({ store, clock, config, audit }) {
       return true;
     },
   };
+}
+
+/**
+ * Key lineage for INV_NO_SELF_APPROVAL: `[apiKeyId, parent, …, root]`. The holder of any key in the
+ * chain received (or could mint) every key below it, so two keys whose lineages intersect are
+ * controlled by the same holder. The parent is `createdBy`; keys stored before that field existed
+ * fall back to the actor of their hash-chained `api_key.created` audit event. Keys provisioned
+ * out-of-band (bootstrap env key, seed/demo scripts) have neither and are roots. Keys are never
+ * deleted, so a missing record only occurs for ids that were never stored. A cycle or a chain
+ * deeper than MAX_LINEAGE_DEPTH throws (callers fail closed).
+ */
+export async function keyLineage(store, apiKeyId) {
+  const chain = [];
+  let id = apiKeyId;
+  while (typeof id === 'string' && id) {
+    if (chain.includes(id) || chain.length >= MAX_LINEAGE_DEPTH) throw new Error('API key lineage is cyclic or too deep');
+    chain.push(id);
+    const key = await store.apiKeys.findById(id);
+    if (!key) break;
+    if (key.createdBy !== undefined) {
+      id = key.createdBy;
+    } else {
+      const created = await store.auditEvents.list({ filter: { type: 'api_key.created', subjectType: 'api_key', subjectId: id }, limit: 1 });
+      id = created.data[0]?.actor?.apiKeyId ?? null;
+    }
+  }
+  return chain;
+}
+
+/** Ids of every API key (any status) owned by `ownerIds`. Throws past MAX_OWNED_KEYS (fail closed). */
+export async function ownedKeyIds(store, ownerIds) {
+  const ids = [];
+  for (const ownerId of new Set(ownerIds.filter((o) => typeof o === 'string' && o))) {
+    let cursor = null;
+    do {
+      const page = await store.apiKeys.list({ filter: { ownerId }, limit: 100, cursor: cursor && decodeCursor(cursor) });
+      ids.push(...page.data.map((k) => k.id));
+      if (ids.length > MAX_OWNED_KEYS) throw new Error('too many API keys owned by the case parties');
+      cursor = page.nextCursor;
+    } while (cursor);
+  }
+  return ids;
 }
