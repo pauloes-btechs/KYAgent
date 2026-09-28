@@ -32,11 +32,18 @@ function dailyLimitHolds({ dailyLimit, spent24h, amount } = {}) {
   return spent24h + amount <= dailyLimit;
 }
 
+// `approver.keyLineage` = [approver apiKeyId, parent, …, root]; `subject.conflictKeyIds` = the
+// lineage of the initiator's key plus the lineages of every key owned by a case party (resolved by
+// the caller from api_keys, see services/apiKeys.js keyLineage). Missing lineage fails closed.
 function notSelfApproval({ approver, subject } = {}) {
   if (!isObj(approver) || !isObj(subject)) return false;
   if (approver.role !== 'admin' || typeof approver.apiKeyId !== 'string' || !approver.apiKeyId) return false;
+  const lineage = approver.keyLineage;
+  const conflicts = subject.conflictKeyIds;
+  if (!Array.isArray(lineage) || lineage[0] !== approver.apiKeyId || !Array.isArray(conflicts)) return false;
   const initiatorKey = subject.initiatedBy?.apiKeyId ?? null;
-  if (initiatorKey !== null && approver.apiKeyId === initiatorKey) return false;
+  if (initiatorKey !== null && (approver.apiKeyId === initiatorKey || !conflicts.includes(initiatorKey))) return false;
+  if (lineage.some((k) => typeof k !== 'string' || conflicts.includes(k))) return false;
   const parties = [subject.agentId, subject.principalId, subject.businessId].filter((p) => p != null);
   return approver.ownerId == null || !parties.includes(approver.ownerId);
 }
@@ -78,8 +85,8 @@ export const INVARIANTS = Object.freeze([
   }),
   inv({
     id: 'INV_NO_SELF_APPROVAL',
-    version: 1,
-    rule: 'confirmer is an admin whose apiKeyId differs from the initiator and whose ownerId is not the agent, principal or business of the case',
+    version: 2,
+    rule: "confirmer is an admin whose ownerId is not the agent, principal or business of the case and whose API-key lineage (the key and every minting ancestor) shares no key with the initiator's key lineage or with the lineage of any key owned by a case party",
     reasonCode: 'FORBIDDEN',
     enforcedAt: 'confirm',
     check: notSelfApproval,

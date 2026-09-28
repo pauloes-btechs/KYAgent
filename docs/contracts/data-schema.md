@@ -23,6 +23,7 @@ Conventions:
 | `ownerId` | string \| null | `op_...` / `biz_...` / null for admin |
 | `secretHash` | string | hex HMAC-SHA256(pepper, secret). **Never returned by API.** |
 | `status` | `'active' \| 'revoked'` | |
+| `createdBy` | string \| null | `key_...` of the admin key that minted it via `POST /v1/api-keys`; `null` for out-of-band keys (bootstrap, seed). Lineage for `INV_NO_SELF_APPROVAL` (harness.md §1). Not returned by the API. |
 | `createdAt`, `lastUsedAt`, `revokedAt` | Date \| null | `lastUsedAt` updated best-effort (may be throttled to once/min) |
 
 Indexes: `{ role: 1, ownerId: 1 }`.
