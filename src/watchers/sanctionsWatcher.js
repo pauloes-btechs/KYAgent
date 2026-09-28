@@ -37,6 +37,7 @@ import { ConflictError } from '../errors.js';
 import { loadActiveHarness } from '../harness/policy.js';
 import { runInvestigation } from '../investigation/pipeline.js';
 import { isLegalTransition, passportService, SYSTEM_ACTOR } from '../services/passports.js';
+import { receiptIdFor, receiptService } from '../services/receipts.js';
 
 export const WATCHER_ID = 'sanctions';
 export const WATCHED_COLLECTION = 'sanctions';
@@ -141,6 +142,7 @@ async function recentCounterparties(store, agentId, now) {
  */
 export function rescreenService({ store, clock, audit, events = null, logger = noopLogger, hooks = {} }) {
   const passports = passportService({ store, clock, audit });
+  const receipts = receiptService({ store, audit });
   const publish = (type, data) => events?.publish(type, data);
   const step = async (name, ctx) => hooks.onStep?.(name, ctx);
 
@@ -224,6 +226,7 @@ export function rescreenService({ store, clock, audit, events = null, logger = n
       trigger: 'sanctions_change',
       now,
       invariantsMatch: harness.invariantsMatch,
+      harness,
       // Every counterparty (and its name, via `$search`) is screened: the primary one plus the rest.
       tx: {
         id,
@@ -278,6 +281,12 @@ export function rescreenService({ store, clock, audit, events = null, logger = n
       datasetVersion: triggerRef.datasetVersion,
       changeEventId: triggerRef.changeEventId,
     });
+    // Receipt before the investigation (investigation-pipeline.md §6). A redelivered event reuses
+    // the receipt already issued for this deterministic investigation id; a failure throws and
+    // the event is retried like any other unrecorded decision.
+    const issued = await store.receipts.findById(receiptIdFor(id));
+    const receipt = issued ? (({ id: _id, agentId: _agentId, ...r }) => r)(issued) : await receipts.issue(SYSTEM_ACTOR, doc, { issuedAt: doc.decidedAt });
+    Object.assign(doc, { receipt, receiptId: receipt.receiptId, receiptHash: receipt.receiptHash });
     try {
       await store.investigations.insert(doc);
     } catch (err) {

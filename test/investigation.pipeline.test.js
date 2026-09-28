@@ -49,6 +49,7 @@ describe('memory retrieval / skeleton pipeline without Atlas', () => {
       ['sanctions', 'passed'],
       ['signals', r.signals.length ? 'flagged' : 'passed'],
       ['memory', 'error'],
+      ['policy', 'skipped'],
       ['decision', 'failed'],
     ]);
     assert.equal(r.stages[4].engine, '$vectorSearch');

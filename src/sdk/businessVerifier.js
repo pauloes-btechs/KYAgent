@@ -5,6 +5,7 @@
 //   const kya = createVerifier({ baseUrl: process.env.KYA_BASE_URL, apiKey: process.env.KYA_API_KEY });
 //   const decision = await kya.verifyIncoming({ headers: req.headers, action: 'payments:create', context });
 //   if (!isAllowed(decision)) return reject(decision.reasons[0].code);
+import { RISK_DECISIONS } from '../contracts.js';
 import { KYA_HEADERS } from './agentSigner.js';
 
 const API_KEY_RE = /^kya_key_[0-9A-HJKMNP-TV-Z]{26}_[A-Za-z0-9_-]{43}$/;
@@ -15,9 +16,17 @@ const MAX_RESPONSE_BYTES = 64 * 1024;
 
 export class KyaSdkError extends Error {}
 
-/** True only for a genuine ALLOW decision. Everything else is a denial. */
+/**
+ * True only for a genuine ALLOW decision. Everything else is a denial. An optional
+ * `riskDecision` (decision-vocabulary.md §6) is passed through untouched, but a REVIEW or
+ * BLOCK never counts as allowed.
+ */
 export function isAllowed(decision) {
-  return decision?.decision === 'ALLOW' && decision.reasons?.[0]?.code === 'ALLOWED';
+  return (
+    decision?.decision === 'ALLOW' &&
+    decision.reasons?.[0]?.code === 'ALLOWED' &&
+    (decision.riskDecision === undefined || decision.riskDecision === 'ALLOW')
+  );
 }
 
 /** Locally produced DENY (never reached, or could not trust, the service). */
@@ -146,7 +155,9 @@ export function createVerifier({ baseUrl, apiKey, timeoutMs = 5000, fetch: fetch
       (body.decision === 'ALLOW' || body.decision === 'DENY') &&
       Array.isArray(body.reasons) &&
       body.reasons.length > 0 &&
-      typeof body.reasons[0]?.code === 'string';
+      typeof body.reasons[0]?.code === 'string' &&
+      // Tolerated, never required; an unknown value is untrustworthy.
+      (body.riskDecision === undefined || RISK_DECISIONS.includes(body.riskDecision));
     if (!wellFormed || (res.status !== 200 && res.status !== 500)) {
       return localDeny('INTERNAL_ERROR', `unexpected response from verification service (${res.status})`, request);
     }
