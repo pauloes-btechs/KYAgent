@@ -34,6 +34,7 @@ export const AUDIT_EVENT_TYPES = Object.freeze([
   'passport.status_changed',
   'investigation.decided',
   'investigation.confirmed',
+  'receipt.issued',
   'memory.promoted',
   'memory.rejected',
   'harness.adapted',

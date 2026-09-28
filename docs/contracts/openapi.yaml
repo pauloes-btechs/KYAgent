@@ -1396,6 +1396,30 @@ components:
         result: { type: object }
         evidence: { type: array, items: { $ref: '#/components/schemas/EvidenceItem' } }
         reasons: { type: array, items: { $ref: '#/components/schemas/RiskReason' } }
+    PolicyStageResult:
+      type: object
+      description: "`result` of the `policy` stage (investigation-pipeline.md §4 row 6)."
+      required: [harnessVersion, invariantsHash, harnessInvariantsHash, policyHash, invariants, passportStatus, escalationsFired]
+      properties:
+        harnessVersion: { type: [integer, 'null'] }
+        invariantsHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        harnessInvariantsHash: { type: [string, 'null'] }
+        policyHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        invariants:
+          type: array
+          items:
+            type: object
+            required: [id, applicable, held]
+            properties:
+              id: { $ref: '#/components/schemas/InvariantId' }
+              applicable: { type: boolean }
+              held: { type: [boolean, 'null'] }
+              droppedUnverified: { type: integer, minimum: 0 }
+        passportStatus:
+          oneOf:
+            - $ref: '#/components/schemas/PassportStatus'
+            - type: 'null'
+        escalationsFired: { type: array, items: { type: string } }
     MemoryHit:
       type: object
       required: [memoryId, title, status, outcome, score, scorePpm, signals, recommendedSteps, usedAsPrecedent]
@@ -1472,6 +1496,11 @@ components:
             - type: 'null'
         receiptId: { type: string }
         receiptHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        receipt:
+          description: Embedded copy of the issued receipt; null only when issuing it failed (BLOCK INTERNAL_ERROR).
+          oneOf:
+            - $ref: '#/components/schemas/Receipt'
+            - type: 'null'
         requestId: { type: [string, 'null'] }
         createdAt: { $ref: '#/components/schemas/IsoDateTime' }
         decidedAt: { $ref: '#/components/schemas/IsoDateTime' }
