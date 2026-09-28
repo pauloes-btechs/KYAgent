@@ -92,7 +92,7 @@ describe('atlas: Vector Search verified security memory', { skip, timeout: 300_0
         signingKeyThumbprint: treasuryBotKey('rotated').thumbprint,
       },
     });
-    assert.deepEqual(r.stages.map((s) => s.name), ['identity', 'delegation', 'sanctions', 'signals', 'memory', 'decision']);
+    assert.deepEqual(r.stages.map((s) => s.name), ['identity', 'delegation', 'sanctions', 'signals', 'memory', 'policy', 'decision']);
     assert.deepEqual(r.stages.map((s) => s.status).slice(0, 2), ['passed', 'passed']);
     assert.deepEqual([...r.signals].sort(), SIMILAR);
     const mem = r.stages[4];

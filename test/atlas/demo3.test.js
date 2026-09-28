@@ -102,7 +102,7 @@ describe('atlas: Demo 3 end-to-end (POST /v1/investigations)', { skip, timeout: 
     assert.equal(inv.trigger, 'api');
     assert.equal(inv.businessId, DEMO_IDS.business);
     assert.equal(inv.delegationId, DEMO_IDS.delegation);
-    assert.deepEqual(inv.stages.map((s) => s.name), ['identity', 'delegation', 'sanctions', 'signals', 'memory', 'decision']);
+    assert.deepEqual(inv.stages.map((s) => s.name), ['identity', 'delegation', 'sanctions', 'signals', 'memory', 'policy', 'decision']);
     assert.equal(inv.stages[0].result.mode, 'signed');
     assert.equal(inv.stages[0].result.reasonCode, 'ALLOWED');
     assert.equal(inv.stages[0].evidence[0].data.signature, 'valid');
@@ -134,7 +134,7 @@ describe('atlas: Demo 3 end-to-end (POST /v1/investigations)', { skip, timeout: 
     assert.equal(doc.harnessVersion, 1);
     assert.equal(doc.memory.hits[0].memoryId, 'mem_INV-1042');
     assert.equal(doc.memory.hits[0].status, 'VERIFIED');
-    assert.equal(doc.stages.length, 6);
+    assert.equal(doc.stages.length, 7);
 
     const { MongoClient } = await import('mongodb');
     const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10_000 });

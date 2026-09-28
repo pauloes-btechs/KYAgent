@@ -640,6 +640,20 @@ export interface StageResult {
   reasons: RiskReason[];
 }
 
+/** `result` of the `policy` stage (investigation-pipeline.md §4 row 6). */
+export interface PolicyStageResult {
+  harnessVersion: number | null;
+  /** Runtime INVARIANTS_HASH. */
+  invariantsHash: string;
+  /** invariantsHash stored on the active harness version (mismatch ⇒ BLOCK HARNESS_INVARIANTS_MISMATCH). */
+  harnessInvariantsHash: string | null;
+  policyHash: string;
+  /** `held` is null when the invariant does not apply to this run (e.g. no amount on a re-screen). */
+  invariants: Array<{ id: InvariantId; applicable: boolean; held: boolean | null; droppedUnverified?: number }>;
+  passportStatus: PassportStatus | null;
+  escalationsFired: string[];
+}
+
 export interface MemoryHit {
   memoryId: MemoryId;
   title: string;
@@ -686,6 +700,8 @@ export interface Investigation {
   passport: { id: PassportId; before: PassportStatus; after: PassportStatus } | null;
   receiptId: ReceiptId;
   receiptHash: string;
+  /** Embedded copy of the issued receipt (null only when issuing it failed ⇒ BLOCK INTERNAL_ERROR). */
+  receipt?: Receipt | null;
   requestId: string | null;
   createdAt: IsoDateTime;
   decidedAt: IsoDateTime;
