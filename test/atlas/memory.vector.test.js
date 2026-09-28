@@ -61,7 +61,8 @@ describe('atlas: Vector Search verified security memory', { skip, timeout: 300_0
         },
       },
     );
-    await ensureSearchIndexes(store.db, loadSearchIndexDefs().filter((d) => d.name === 'memory_vector'), { timeoutMs: 180_000 });
+    // Both indexes: the sanctions stage screens the counterparty name with $search.
+    await ensureSearchIndexes(store.db, loadSearchIndexDefs(), { timeoutMs: 180_000 });
     // Freshly inserted documents take a moment to reach the index.
     const deadline = Date.now() + 120_000;
     for (;;) {
@@ -91,10 +92,10 @@ describe('atlas: Vector Search verified security memory', { skip, timeout: 300_0
         signingKeyThumbprint: treasuryBotKey('rotated').thumbprint,
       },
     });
-    assert.deepEqual(r.stages.map((s) => s.name), ['identity', 'delegation', 'signals', 'memory', 'decision']);
+    assert.deepEqual(r.stages.map((s) => s.name), ['identity', 'delegation', 'sanctions', 'signals', 'memory', 'policy', 'decision']);
     assert.deepEqual(r.stages.map((s) => s.status).slice(0, 2), ['passed', 'passed']);
     assert.deepEqual([...r.signals].sort(), SIMILAR);
-    const mem = r.stages[3];
+    const mem = r.stages[4];
     assert.equal(mem.engine, '$vectorSearch');
     assert.equal(r.memory.engine, '$vectorSearch');
     assert.equal(r.memory.hits[0].memoryId, 'mem_INV-1042');

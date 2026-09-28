@@ -4,6 +4,15 @@
 #   make demo-reset        restore the exact judging scenario (idempotent)
 #   make demo              serve the API + dashboard on Atlas over that scenario
 #   make demo CHECK=1      headless scenario + search-index check, exits non-zero on mismatch
+#   make demo CHECK=1 DEMO=1
+#                          run Demo 1 (1 500 USDC to a known counterparty -> ALLOW, passport
+#                          ACTIVE, receipt persisted); run right after demo-reset
+#   make demo CHECK=1 DEMO=2
+#                          run Demo 2 (30 000 USDC > delegation max -> BLOCK
+#                          DELEGATION_MAX_EXCEEDED wrapping CONSTRAINT_VIOLATION, receipt persisted)
+#   make demo CHECK=1 DEMO=3
+#                          run Demo 3 (verified memory -> REVIEW) via POST /v1/investigations,
+#                          exits 0 only on the expected outcome
 #   make demo-seed         upsert the demo documents only (no clear, no index wait)
 
 NODE ?= node
@@ -11,7 +20,7 @@ NODE ?= node
 .PHONY: demo demo-reset demo-seed test test-atlas
 
 demo:
-	$(NODE) scripts/demo.js $(if $(CHECK),--check,)
+	$(NODE) scripts/demo.js $(if $(CHECK),--check,) $(if $(DEMO),--demo $(DEMO),)
 
 demo-reset:
 	$(NODE) scripts/demo-reset.js

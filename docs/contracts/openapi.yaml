@@ -756,6 +756,163 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
 
+  /v1/investigations:
+    post:
+      tags: [investigations]
+      operationId: createInvestigation
+      x-roles: [admin, business]
+      x-implemented-by: T08
+      description: |
+        Runs the investigation pipeline (investigation-pipeline.md) for a signed agent action and returns the
+        persisted investigation with `riskDecision` ALLOW/REVIEW/BLOCK. Fail closed: internal failures return 500
+        with a BLOCK/INTERNAL_ERROR investigation body when it could be persisted. The signed request's nonce is
+        consumed exactly as by /v1/verify. `/v1/verify` itself is unchanged. The audience is the calling business;
+        for admin callers it must name an existing business. Until T15, `receiptId` and `receiptHash` are null.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvestigationRequest' }
+      responses:
+        '201':
+          description: Investigation decided and persisted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Investigation' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500':
+          description: Pipeline failed — fail closed (BLOCK / INTERNAL_ERROR)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Investigation' }
+        '503': { $ref: '#/components/responses/Error' }
+  /v1/investigations/{id}/confirm:
+    post:
+      tags: [investigations]
+      operationId: confirmInvestigation
+      x-roles: [admin]
+      x-implemented-by: T13
+      description: |
+        Human confirmation of an investigation outcome (harness.md §6). Promotes the case memory
+        (UNVERIFIED -> VERIFIED, or -> REJECTED for CLEAN) and, when `approveAdaptation` is true, persists the
+        validated adaptive-policy proposal as a new harness version plus a harness_events entry.
+        INV_NO_SELF_APPROVAL: 403 when the confirming key initiated the investigation or owns its agent,
+        principal or business. 409 INVALID_STATE when already confirmed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/HarnessId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfirmInvestigationRequest' }
+      responses:
+        '200':
+          description: Outcome recorded; memory and harness effects
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfirmInvestigationResponse' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /v1/investigations/{id}/receipt:
+    get:
+      tags: [investigations]
+      operationId: getInvestigationReceipt
+      x-roles: [admin, operator(own agents), business(own)]
+      x-implemented-by: T15
+      description: Compliance receipt (receipt.schema.json) including `receiptHash` and its `receipt.issued` audit anchor.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/HarnessId' }
+      responses:
+        '200':
+          description: Receipt
+          headers:
+            X-KYA-Receipt-Integrity:
+              description: "`valid` when receiptHash equals sha256(canonicalJson(receipt without receiptHash/anchor)) and the anchoring `receipt.issued` audit event notarises that hash; `mismatch` otherwise (the stored receipt is returned verbatim, never repaired)."
+              schema: { type: string, enum: [valid, mismatch] }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/harness/versions:
+    get:
+      tags: [harness]
+      operationId: listHarnessVersions
+      x-roles: [admin, business]
+      x-implemented-by: T13
+      description: All harness versions, newest first; exactly one has status `active`.
+      responses:
+        '200':
+          description: Harness versions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, invariantsHash]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/HarnessVersion' } }
+                  invariantsHash: { type: string, pattern: '^[0-9a-f]{64}$', description: Runtime INVARIANTS_HASH }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /v1/harness/events:
+    get:
+      tags: [harness]
+      operationId: listHarnessEvents
+      x-roles: [admin, business]
+      x-implemented-by: T13
+      description: Harness adaptation events (old/new policy, diff, evidence, approval, timestamp), newest first.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Page of harness events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/HarnessEvent' } }
+                  nextCursor: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /v1/events/stream:
+    get:
+      tags: [events]
+      operationId: streamEvents
+      x-roles: [admin]
+      x-implemented-by: T11
+      description: |
+        Server-Sent Events feed (text/event-stream) of `sanctions.change_detected`, `passport.status_changed`,
+        `investigation.decided` and `harness.adapted` (types.ts HarnessStreamEvent). Each SSE `event:` is the type,
+        `data:` the JSON object. Keep-alive comment every 15 s. Not rate-limited per event; one stream per key.
+        Also emits the Demo 4 progress steps `change_detected`, `affected_agent`, `rescreen_started` and
+        `passport_suspended` (same framing). A newer stream for the same key closes the older one; 503 when too many streams are open.
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+
 components:
   securitySchemes:
     apiKey:
@@ -1264,6 +1421,30 @@ components:
         result: { type: object }
         evidence: { type: array, items: { $ref: '#/components/schemas/EvidenceItem' } }
         reasons: { type: array, items: { $ref: '#/components/schemas/RiskReason' } }
+    PolicyStageResult:
+      type: object
+      description: "`result` of the `policy` stage (investigation-pipeline.md §4 row 6)."
+      required: [harnessVersion, invariantsHash, harnessInvariantsHash, policyHash, invariants, passportStatus, escalationsFired]
+      properties:
+        harnessVersion: { type: [integer, 'null'] }
+        invariantsHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        harnessInvariantsHash: { type: [string, 'null'] }
+        policyHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        invariants:
+          type: array
+          items:
+            type: object
+            required: [id, applicable, held]
+            properties:
+              id: { $ref: '#/components/schemas/InvariantId' }
+              applicable: { type: boolean }
+              held: { type: [boolean, 'null'] }
+              droppedUnverified: { type: integer, minimum: 0 }
+        passportStatus:
+          oneOf:
+            - $ref: '#/components/schemas/PassportStatus'
+            - type: 'null'
+        escalationsFired: { type: array, items: { type: string } }
     MemoryHit:
       type: object
       required: [memoryId, title, status, outcome, score, scorePpm, signals, recommendedSteps, usedAsPrecedent]
@@ -1340,6 +1521,11 @@ components:
             - type: 'null'
         receiptId: { type: string }
         receiptHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        receipt:
+          description: Embedded copy of the issued receipt; null only when issuing it failed (BLOCK INTERNAL_ERROR).
+          oneOf:
+            - $ref: '#/components/schemas/Receipt'
+            - type: 'null'
         requestId: { type: [string, 'null'] }
         createdAt: { $ref: '#/components/schemas/IsoDateTime' }
         decidedAt: { $ref: '#/components/schemas/IsoDateTime' }
@@ -1506,37 +1692,6 @@ components:
 # ---------------------------------------------------------------------------
 x-planned-paths:
   /v1/investigations:
-    post:
-      tags: [investigations]
-      operationId: createInvestigation
-      x-roles: [admin, business]
-      x-implemented-by: T08
-      description: |
-        Runs the investigation pipeline (investigation-pipeline.md) for a signed agent action and returns the
-        persisted investigation with `riskDecision` ALLOW/REVIEW/BLOCK. Fail closed: internal failures return 500
-        with a BLOCK/INTERNAL_ERROR investigation body when it could be persisted. The signed request's nonce is
-        consumed exactly as by /v1/verify. `/v1/verify` itself is unchanged.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/InvestigationRequest' }
-      responses:
-        '201':
-          description: Investigation decided and persisted (with receipt)
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Investigation' }
-        '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-        '429': { $ref: '#/components/responses/Error' }
-        '500':
-          description: Pipeline failed — fail closed (BLOCK / INTERNAL_ERROR)
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Investigation' }
-        '503': { $ref: '#/components/responses/Error' }
     get:
       tags: [investigations]
       operationId: listInvestigations
@@ -1588,60 +1743,6 @@ x-planned-paths:
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
-  /v1/investigations/{id}/receipt:
-    get:
-      tags: [investigations]
-      operationId: getInvestigationReceipt
-      x-roles: [admin, operator(own agents), business(own)]
-      x-implemented-by: T15
-      description: Compliance receipt (receipt.schema.json) including `receiptHash` and its `receipt.issued` audit anchor.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { $ref: '#/components/schemas/HarnessId' }
-      responses:
-        '200':
-          description: Receipt
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Receipt' }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
-  /v1/investigations/{id}/confirm:
-    post:
-      tags: [investigations]
-      operationId: confirmInvestigation
-      x-roles: [admin]
-      x-implemented-by: T13
-      description: |
-        Human confirmation of an investigation outcome (harness.md §6). Promotes the case memory
-        (UNVERIFIED -> VERIFIED, or -> REJECTED for CLEAN) and, when `approveAdaptation` is true, persists the
-        validated adaptive-policy proposal as a new harness version plus a harness_events entry.
-        INV_NO_SELF_APPROVAL: 403 when the confirming key initiated the investigation or owns its agent,
-        principal or business. 409 INVALID_STATE when already confirmed.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { $ref: '#/components/schemas/HarnessId' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ConfirmInvestigationRequest' }
-      responses:
-        '200':
-          description: Outcome recorded; memory and harness effects
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ConfirmInvestigationResponse' }
-        '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
   /v1/passports/{id}:
     get:
       tags: [passports]
@@ -1696,67 +1797,6 @@ x-planned-paths:
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
-  /v1/harness/versions:
-    get:
-      tags: [harness]
-      operationId: listHarnessVersions
-      x-roles: [admin, business]
-      x-implemented-by: T13
-      description: All harness versions, newest first; exactly one has status `active`.
-      responses:
-        '200':
-          description: Harness versions
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data, invariantsHash]
-                properties:
-                  data: { type: array, items: { $ref: '#/components/schemas/HarnessVersion' } }
-                  invariantsHash: { type: string, pattern: '^[0-9a-f]{64}$', description: Runtime INVARIANTS_HASH }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-  /v1/harness/events:
-    get:
-      tags: [harness]
-      operationId: listHarnessEvents
-      x-roles: [admin, business]
-      x-implemented-by: T13
-      description: Harness adaptation events (old/new policy, diff, evidence, approval, timestamp), newest first.
-      parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Cursor'
-      responses:
-        '200':
-          description: Page of harness events
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data, nextCursor]
-                properties:
-                  data: { type: array, items: { $ref: '#/components/schemas/HarnessEvent' } }
-                  nextCursor: { type: [string, 'null'] }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-  /v1/events/stream:
-    get:
-      tags: [events]
-      operationId: streamEvents
-      x-roles: [admin]
-      x-implemented-by: T11
-      description: |
-        Server-Sent Events feed (text/event-stream) of `sanctions.change_detected`, `passport.status_changed`,
-        `investigation.decided` and `harness.adapted` (types.ts HarnessStreamEvent). Each SSE `event:` is the type,
-        `data:` the JSON object. Keep-alive comment every 15 s. Not rate-limited per event; one stream per key.
-      responses:
-        '200':
-          description: Event stream
-          content:
-            text/event-stream:
-              schema: { type: string }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
   /v1/demo/{id}/run:
     post:
       tags: [demo]
