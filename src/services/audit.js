@@ -33,6 +33,11 @@ export const AUDIT_EVENT_TYPES = Object.freeze([
   'passport.issued',
   'passport.status_changed',
   'investigation.decided',
+  'investigation.confirmed',
+  'memory.promoted',
+  'memory.rejected',
+  'harness.adapted',
+  'harness.adaptation_rejected',
 ]);
 
 export const GENESIS_HASH = '0'.repeat(64);
