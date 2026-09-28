@@ -136,7 +136,7 @@ function parseQuery(url, spec, paginated) {
   return out;
 }
 
-export function buildApp({ config, store, clock = systemClock, logger = createLogger(config.logLevel) }) {
+export function buildApp({ config, store, clock = systemClock, logger = createLogger(config.logLevel), llm = null }) {
   const audit = auditService({ store, clock });
   const deps = { store, clock, config, audit };
   const services = {
@@ -149,7 +149,8 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
     credentials: credentialService(deps),
     verification: verificationService(deps),
     trust: trustService(deps),
-    investigations: investigationService(deps),
+    // `llm` ({ model, complete }) is used only when LLM_MODE=live, to propose harness policy diffs.
+    investigations: investigationService({ ...deps, llm }),
   };
   const s = services;
   const dashboard = loadDashboard();
@@ -193,6 +194,10 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
     { m: 'POST', p: '/v1/verify', roles: ['business'], body: 'verify', rateLimit: 'verify', h: null },
     // Investigation pipeline (trigger `api`); the handler returns { status, body }: 201, or 500 fail-closed BLOCK.
     { m: 'POST', p: '/v1/investigations', roles: ['admin', 'business'], body: 'json', rateLimit: 'verify', dynamicStatus: true, h: (c) => s.investigations.create(c.principal, c.body, c.requestId) },
+    // Human confirmation + harness adaptation (harness.md §6). INV_NO_SELF_APPROVAL is enforced in the service.
+    { m: 'POST', p: '/v1/investigations/:id/confirm', roles: ['admin'], body: 'json', h: (c) => s.investigations.confirm(c.principal, c.id, c.body) },
+    { m: 'GET', p: '/v1/harness/versions', roles: ['admin', 'business'], h: () => s.investigations.listHarnessVersions() },
+    { m: 'GET', p: '/v1/harness/events', roles: ['admin', 'business'], h: (c) => s.investigations.listHarnessEvents(c.principal, c.query) },
     { m: 'GET', p: '/v1/audit-events', roles: ['admin'], query: { type: q.auditType, subjectId: q.str64 }, h: (c) => s.audit.list(c.principal, c.query) },
     { m: 'GET', p: '/v1/audit-events/integrity', roles: ['admin'], h: () => s.audit.verifyChain() },
     { m: 'GET', p: '/v1/verifications', roles: ['admin', 'business'], query: { agentId: q.str64, decision: q.decision }, h: (c) => s.verification.list(c.principal, c.query) },
