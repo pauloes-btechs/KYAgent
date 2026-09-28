@@ -22,6 +22,7 @@ import { normalizeSignals, signalsText } from '../memory/signalsText.js';
 import { schemas, validate } from '../validate.js';
 import { actorOf } from './audit.js';
 import { actionMatches } from './authz.js';
+import { receiptService } from './receipts.js';
 
 export const HARNESS_ID_RE = /^[a-z]{2,4}_[A-Za-z0-9_-]{1,64}$/;
 const EVM_ADDRESS_RE = /^0x[0-9a-f]{40}$/;
@@ -95,6 +96,7 @@ const iso = (v) => (v instanceof Date ? v.toISOString() : v ?? null);
 const harnessEventOut = ({ _id, id, ...rest }) => ({ id: id ?? _id, ...rest, approvedAt: iso(rest.approvedAt), at: iso(rest.at) });
 
 export function investigationService({ store, clock, config, audit, llm = null }) {
+  const receipts = receiptService({ store, audit });
   /** /v1/verify steps 2–8 in order; returns the first failing reason code (or ALLOWED). */
   async function signedIdentity(principal, req, now) {
     const out = { reasonCode: 'ALLOWED', signature: 'not_checked', nonce: 'not_checked', businessId: null, agent: null };
@@ -271,6 +273,7 @@ export function investigationService({ store, clock, config, audit, llm = null }
         trigger: 'api',
         now,
         invariantsMatch: harness.invariantsMatch,
+        harness,
         signedIdentity: { reasonCode: signed.reasonCode, signature: signed.signature, nonce: signed.nonce },
         tx: { id, ...transaction, resource: req.resource, signingKeyThumbprint: agent?.keyThumbprint ?? null },
       });
@@ -328,6 +331,19 @@ export function investigationService({ store, clock, config, audit, llm = null }
         doc.riskDecision = 'BLOCK';
         doc.status = 'DECIDED';
         doc.reasons = [{ code: 'INTERNAL_ERROR', riskDecision: 'BLOCK', message: 'The decision could not be audited; failing closed.', stage: 'decision' }];
+        status = 500;
+      }
+      // Receipt (notarised by `receipt.issued`) before the investigation is stored; a receipt
+      // that cannot be written makes the investigation BLOCK / INTERNAL_ERROR (§5).
+      try {
+        const receipt = await receipts.issue(principal, doc, { issuedAt: doc.decidedAt });
+        Object.assign(doc, { receipt, receiptId: receipt.receiptId, receiptHash: receipt.receiptHash });
+      } catch {
+        doc.decision = 'DENY';
+        doc.riskDecision = 'BLOCK';
+        doc.status = 'DECIDED';
+        doc.reasons = [{ code: 'INTERNAL_ERROR', riskDecision: 'BLOCK', message: 'The receipt could not be issued; failing closed.', stage: 'decision' }];
+        doc.receipt = null;
         status = 500;
       }
       try {
