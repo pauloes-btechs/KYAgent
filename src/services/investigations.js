@@ -12,9 +12,15 @@ import { ACTION_RE } from '../contracts.js';
 import { buildSigningString, canonicalJson, CanonicalJsonError } from '../crypto/canonical.js';
 import { parsePublicKey, sha256hex, verifySignature } from '../crypto/ed25519.js';
 import { ApiError, validationError } from '../errors.js';
+import { evaluateProposal, proposeFromOutcome } from '../harness/adaptation.js';
+import { holds, INVARIANTS_HASH } from '../harness/invariants.js';
+import { harnessVersionOut, listHarnessVersions, loadActiveHarness, policyHash } from '../harness/policy.js';
 import { newId } from '../ids.js';
-import { DEFAULT_POLICY, runInvestigation } from '../investigation/pipeline.js';
+import { runInvestigation } from '../investigation/pipeline.js';
+import { embedWithMeta } from '../memory/embeddings.js';
+import { normalizeSignals, signalsText } from '../memory/signalsText.js';
 import { schemas, validate } from '../validate.js';
+import { actorOf } from './audit.js';
 import { actionMatches } from './authz.js';
 
 export const HARNESS_ID_RE = /^[a-z]{2,4}_[A-Za-z0-9_-]{1,64}$/;
@@ -62,7 +68,33 @@ function parseRequest(body) {
 
 const investigationOut = ({ _id, id, ...rest }) => ({ id: id ?? _id, ...rest });
 
-export function investigationService({ store, clock, config, audit }) {
+export const OUTCOMES = Object.freeze(['CLEAN', 'CONFIRMED_ACCOUNT_TAKEOVER', 'FALSE_POSITIVE', 'SANCTIONS_MATCH']);
+const CONFIRMABLE = ['DECIDED', 'AWAITING_REVIEW'];
+/** Case memory id (mongo-collections.md security_memories: `mem_<sourceInvestigationId>`). */
+export const caseMemoryId = (investigationId) => `mem_${investigationId}`;
+
+/** ConfirmInvestigationRequest (openapi): { outcome, approveAdaptation, note? }, no other keys. */
+function parseConfirm(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw validationError([{ path: '', message: 'must be an object' }], 'Confirmation request is invalid');
+  }
+  const details = [];
+  for (const k of Object.keys(body)) {
+    if (!['outcome', 'approveAdaptation', 'note'].includes(k)) details.push({ path: `/${k}`, message: 'is not allowed' });
+  }
+  if (!OUTCOMES.includes(body.outcome)) details.push({ path: '/outcome', message: `must be one of ${OUTCOMES.join(', ')}` });
+  if (typeof body.approveAdaptation !== 'boolean') details.push({ path: '/approveAdaptation', message: 'must be a boolean' });
+  if (body.note !== undefined && (typeof body.note !== 'string' || body.note.length > 1000)) {
+    details.push({ path: '/note', message: 'must be a string of at most 1000 characters' });
+  }
+  if (details.length) throw validationError(details, 'Confirmation request is invalid');
+  return { outcome: body.outcome, approveAdaptation: body.approveAdaptation, note: body.note ?? null };
+}
+
+const iso = (v) => (v instanceof Date ? v.toISOString() : v ?? null);
+const harnessEventOut = ({ _id, id, ...rest }) => ({ id: id ?? _id, ...rest, approvedAt: iso(rest.approvedAt), at: iso(rest.at) });
+
+export function investigationService({ store, clock, config, audit, llm = null }) {
   /** /v1/verify steps 2–8 in order; returns the first failing reason code (or ALLOWED). */
   async function signedIdentity(principal, req, now) {
     const out = { reasonCode: 'ALLOWED', signature: 'not_checked', nonce: 'not_checked', businessId: null, agent: null };
@@ -93,15 +125,117 @@ export function investigationService({ store, clock, config, audit }) {
     return { ...out, nonce: 'fresh' };
   }
 
-  /** Active harness version (harness_versions) or v1 defaults. */
-  async function activeHarness() {
-    const [active] = await store.harnessVersions.find({ status: 'active' }, { limit: 1 });
-    if (!active?.policy) return { version: 1, policy: DEFAULT_POLICY };
-    const { k, numCandidates, minScorePpm } = { ...DEFAULT_POLICY.memoryRetrieval, ...active.policy.memoryRetrieval };
+  /**
+   * UNVERIFIED case memory for an investigation (never retrievable until a human verifies it).
+   * The embedding comes from the same adapter as retrieval: embed(signalsText(signals)).
+   */
+  async function buildCaseMemory(inv, now) {
+    const signals = normalizeSignals(inv.signals ?? []);
+    const text = signalsText(signals);
+    const { embedding, embeddingModel, embeddingTextSha256 } = await embedWithMeta(text);
     return {
-      version: active.version ?? active.id,
-      policy: { memoryRetrieval: { k, numCandidates, minScorePpm }, escalation: active.policy.escalation ?? DEFAULT_POLICY.escalation },
+      id: caseMemoryId(inv.id),
+      title: `Case ${inv.id}: ${signals.length ? signals.join(', ') : 'no behavioral signals'}`,
+      summary: `Candidate memory from investigation ${inv.id} (${inv.riskDecision} ${inv.reasons?.[0]?.code ?? ''}).`,
+      status: 'UNVERIFIED',
+      outcome: null,
+      signals,
+      signalsText: text,
+      embedding,
+      embeddingModel,
+      embeddingTextSha256,
+      recommendedSteps: [],
+      sourceInvestigationId: inv.id,
+      agentId: inv.agentId ?? null,
+      principalId: inv.principalId ?? null,
+      verifiedBy: null,
+      verifiedAt: null,
+      createdAt: now,
     };
+  }
+
+  /**
+   * Validate and (when approved) apply an adaptation proposal (harness.md §6.4–6.5).
+   * Applied: supersede vN, insert vN+1, audit `harness.adapted`, harness_events `adaptation.applied`.
+   * Otherwise: audit `harness.adaptation_rejected`, harness_events `adaptation.rejected`, no version change.
+   */
+  async function recordAdaptation({ principal, approver, inv, mem, harness, proposal, approve, now }) {
+    const fromVersion = harness.version;
+    const errors = [];
+    if (proposal.error) errors.push({ path: '/proposal', message: `${proposal.error.code}: ${proposal.error.message}` });
+    if (!harness.persisted) errors.push({ path: '/harness', message: 'no persisted active harness version' });
+    if (!harness.invariantsMatch) errors.push({ path: '/harness/invariantsHash', message: 'active version invariantsHash differs from runtime' });
+    const evaluated = errors.length ? { ok: false, newPolicy: null, errors: [] } : evaluateProposal(harness.policy, proposal.diff);
+    errors.push(...evaluated.errors);
+    if (!errors.length && !approve) errors.push({ path: '/approveAdaptation', message: 'adaptation not approved by the confirming admin' });
+
+    const eventId = newId('hev');
+    const base = {
+      id: eventId,
+      fromVersion,
+      diff: proposal.diff,
+      oldPolicy: harness.policy,
+      oldPolicyHash: harness.policyHash,
+      invariantsHash: INVARIANTS_HASH,
+      evidence: [
+        { type: 'investigation', id: inv.id },
+        { type: 'memory', id: mem.id },
+      ],
+      proposer: proposal.proposer,
+      approvedBy: { role: 'admin', apiKeyId: approver.apiKeyId, ownerId: approver.ownerId ?? null },
+      approvedAt: now,
+      at: now,
+    };
+
+    if (errors.length) {
+      const rejection = errors.slice(0, 20);
+      const aud = await audit.record(principal, 'harness.adaptation_rejected', { type: 'harness_event', id: eventId }, {
+        fromVersion,
+        investigationId: inv.id,
+        memoryId: mem.id,
+        errors: rejection.map((e) => `${e.path} ${e.message}`),
+      });
+      await store.harnessEvents.insert({ ...base, type: 'adaptation.rejected', toVersion: null, newPolicy: null, newPolicyHash: null, rejection, auditEventId: aud.id });
+      return { applied: false, eventId, toVersion: null };
+    }
+
+    const toVersion = fromVersion + 1;
+    const { newPolicy } = evaluated;
+    const newPolicyHash = policyHash(newPolicy);
+    // Supersede vN first, then insert vN+1 (unique partial index: at most one active version).
+    const superseded = await store.harnessVersions.updateIf(fromVersion, ['active'], { status: 'superseded' });
+    if (!superseded) throw new ApiError('INVALID_STATE', 'The active harness version changed concurrently');
+    const reactivate = () => store.harnessVersions.updateIf(fromVersion, ['superseded'], { status: 'active' });
+    try {
+      await store.harnessVersions.insert({
+        id: toVersion,
+        version: toVersion,
+        status: 'active',
+        parentVersion: fromVersion,
+        invariantsHash: INVARIANTS_HASH,
+        policy: newPolicy,
+        policyHash: newPolicyHash,
+        createdAt: now,
+        approvedBy: base.approvedBy,
+        sourceEventId: eventId,
+      });
+    } catch {
+      await reactivate().catch(() => {});
+      throw new ApiError('INTERNAL_ERROR');
+    }
+    // An unaudited adaptation must not stay active.
+    const aud = await audit.recordOrCompensate(
+      principal,
+      'harness.adapted',
+      { type: 'harness_event', id: eventId },
+      { fromVersion, toVersion, oldPolicyHash: harness.policyHash, newPolicyHash, invariantsHash: INVARIANTS_HASH, investigationId: inv.id, memoryId: mem.id, diff: proposal.diff },
+      async () => {
+        await store.harnessVersions.updateIf(toVersion, ['active'], { status: 'superseded' });
+        await reactivate();
+      },
+    );
+    await store.harnessEvents.insert({ ...base, type: 'adaptation.applied', toVersion, newPolicy, newPolicyHash, auditEventId: aud.id });
+    return { applied: true, eventId, toVersion };
   }
 
   /** Delegation under test: first active grant (createdAt asc) from the business that covers the action. */
@@ -120,7 +254,7 @@ export function investigationService({ store, clock, config, audit }) {
       const signed = await signedIdentity(principal, req, now);
       const agent = signed.agent;
       const grant = signed.reasonCode === 'ALLOWED' ? await delegationFor(agent.id, signed.businessId, req.action, now) : null;
-      const harness = await activeHarness();
+      const harness = await loadActiveHarness(store);
       const ctx = req.context;
       const transaction = {
         asset: ctx.currency,
@@ -136,6 +270,7 @@ export function investigationService({ store, clock, config, audit }) {
         policy: harness.policy,
         trigger: 'api',
         now,
+        invariantsMatch: harness.invariantsMatch,
         signedIdentity: { reasonCode: signed.reasonCode, signature: signed.signature, nonce: signed.nonce },
         tx: { id, ...transaction, resource: req.resource, signingKeyThumbprint: agent?.keyThumbprint ?? null },
       });
