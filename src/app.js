@@ -32,6 +32,7 @@ const DASHBOARD_FILES = {
   'index.html': 'text/html; charset=utf-8',
   'app.js': 'text/javascript; charset=utf-8',
   'trust.js': 'text/javascript; charset=utf-8',
+  'investigations.js': 'text/javascript; charset=utf-8',
   'styles.css': 'text/css; charset=utf-8',
 };
 const DASHBOARD_CSP =
