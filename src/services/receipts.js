@@ -6,8 +6,10 @@
 //
 // Order (fail closed): build -> audit `receipt.issued` -> insert into `receipts`. A failure of
 // either write rejects; the caller records the investigation BLOCK / INTERNAL_ERROR.
+import { timingSafeEqual } from 'node:crypto';
 import { canonicalJson } from '../crypto/canonical.js';
 import { sha256hex } from '../crypto/ed25519.js';
+import { ApiError } from '../errors.js';
 import { INVARIANTS_HASH } from '../harness/invariants.js';
 import { TRUST_RULES_VERSION } from './trust.js';
 
@@ -106,8 +108,58 @@ export function buildReceipt(inv, { issuedAt }) {
   return receipt;
 }
 
+const HASH_RE = /^[0-9a-f]{64}$/;
+const INVESTIGATION_ID_RE = /^inv_[A-Za-z0-9_-]{1,64}$/;
+const sameHash = (a, b) =>
+  typeof a === 'string' && typeof b === 'string' && HASH_RE.test(a) && HASH_RE.test(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+
+/** Strip storage-only fields: the API returns exactly the receipt.schema.json document. */
+const receiptOut = ({ _id, id: _storedId, agentId: _agentId, ...receipt }) => receipt;
+
+/** Tenant scope (ARCHITECTURE §5), decided on the investigation document, not on the receipt. */
+function canSee(principal, inv) {
+  if (principal?.role === 'admin') return true;
+  if (principal?.role === 'operator') return Boolean(inv.principalId) && inv.principalId === principal.operatorId;
+  if (principal?.role === 'business') return Boolean(inv.businessId) && inv.businessId === principal.businessId;
+  return false;
+}
+
 export function receiptService({ store, audit }) {
+  /**
+   * Integrity of a stored receipt: the body must hash to `receiptHash`, and that hash must equal the
+   * one notarised by the anchoring `receipt.issued` audit event, so rewriting `receiptHash` after
+   * tampering is detected too. The audit chain itself is checked by audit.verifyChain().
+   */
+  async function verify(receipt) {
+    const recomputedHash = receiptHashOf(receipt);
+    const hashMatches = sameHash(recomputedHash, receipt.receiptHash);
+    const a = receipt.anchor;
+    const [ev] = Number.isSafeInteger(a?.auditSeq) && a.auditSeq >= 1 ? await store.auditEvents.range(a.auditSeq, 1) : [];
+    const anchorMatches =
+      Boolean(ev) &&
+      ev.seq === a.auditSeq &&
+      ev.id === a.auditEventId &&
+      ev.hash === a.auditHash &&
+      ev.type === 'receipt.issued' &&
+      ev.subjectId === receipt.receiptId &&
+      sameHash(ev.data?.receiptHash, recomputedHash);
+    return { valid: hashMatches && anchorMatches, hashMatches, anchorMatches, recomputedHash };
+  }
+
   return {
+    verify,
+
+    /** GET /v1/investigations/{id}/receipt. Missing or cross-tenant ⇒ 404 (no existence oracle). */
+    async getForInvestigation(principal, investigationId) {
+      if (typeof investigationId !== 'string' || !INVESTIGATION_ID_RE.test(investigationId)) throw new ApiError('NOT_FOUND');
+      const inv = await store.investigations.findById(investigationId);
+      if (!inv || !canSee(principal, inv)) throw new ApiError('NOT_FOUND');
+      const stored = await store.receipts.findById(inv.receiptId ?? receiptIdFor(inv.id));
+      if (!stored || stored.investigationId !== inv.id) throw new ApiError('NOT_FOUND');
+      const receipt = receiptOut(stored);
+      return { receipt, integrity: await verify(receipt) };
+    },
+
     /**
      * Issue the receipt for a decided investigation: audit `receipt.issued` (the notarisation),
      * then persist it in `receipts`. Returns the receipt with its `anchor`. Rejects on failure.

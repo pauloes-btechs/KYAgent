@@ -18,6 +18,7 @@ import { credentialService } from './services/credentials.js';
 import { grantService } from './services/grants.js';
 import { investigationService } from './services/investigations.js';
 import { businessService, operatorService } from './services/operators.js';
+import { receiptService } from './services/receipts.js';
 import { trustService } from './services/trust.js';
 import { verificationService } from './services/verification.js';
 import { decodeCursor } from './store/pagination.js';
@@ -155,6 +156,7 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
     trust: trustService(deps),
     // `llm` ({ model, complete }) is used only when LLM_MODE=live, to propose harness policy diffs.
     investigations: investigationService({ ...deps, llm }),
+    receipts: receiptService(deps),
   };
   const s = services;
   const dashboard = loadDashboard();
@@ -208,6 +210,12 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
       const a = r.adaptation;
       if (a?.applied) events.publish('harness.adapted', { fromVersion: a.fromVersion, toVersion: a.toVersion, eventId: a.eventId });
       return r;
+    } },
+    // Compliance receipt (receipt.schema.json), returned exactly as stored. The recomputed hash +
+    // audit-anchor check is reported in X-KYA-Receipt-Integrity (valid | mismatch).
+    { m: 'GET', p: '/v1/investigations/:id/receipt', roles: ALL, dynamicStatus: true, h: async (c) => {
+      const { receipt, integrity } = await s.receipts.getForInvestigation(c.principal, c.id);
+      return { status: 200, body: receipt, headers: { 'X-KYA-Receipt-Integrity': integrity.valid ? 'valid' : 'mismatch' } };
     } },
     // Server-Sent Events (openapi streamEvents): handled by openEventStream, one stream per API key.
     { m: 'GET', p: '/v1/events/stream', roles: ['admin'], sse: true, h: null },
@@ -405,7 +413,7 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
         body = parsed.body;
       }
       const result = await route.h({ principal, id, query, body, requestId });
-      if (route.dynamicStatus) return send(res, result.status, result.body, requestId);
+      if (route.dynamicStatus) return send(res, result.status, result.body, requestId, result.headers ?? {});
       return send(res, route.status ?? 200, result, requestId, route.noStore ? { 'Cache-Control': 'no-store' } : {});
     } catch (err) {
       const apiErr = toApiError(err);

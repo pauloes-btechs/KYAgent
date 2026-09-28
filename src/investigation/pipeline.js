@@ -352,7 +352,8 @@ export async function runInvestigation({
     return { status: r.exactHit ? 'failed' : reasons.length ? 'flagged' : 'passed', result: r.result, evidence: r.evidence, reasons };
   });
 
-  await run('signals', store.db ? 'aggregate' : 'js', async () => {
+  // StageEngine (types.ts): the in-process fallback is 'code', not computeSignals' own 'js' label.
+  await run('signals', store.db ? 'aggregate' : 'code', async () => {
     if (rescreen) return notApplicable('sanctions_change re-screen has no candidate payment');
     const r = await computeSignals({ store, agent, grant, tx: payment(), now });
     ctx.signals = r.signals;
