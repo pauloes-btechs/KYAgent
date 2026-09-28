@@ -70,6 +70,30 @@ export const REASON_MESSAGES = Object.freeze({
   INTERNAL_ERROR: 'Verification could not be completed; denied by default',
 });
 
+// Investigation-layer vocabulary (decision-vocabulary.md). `Decision` / REASON_CODES above stay
+// the /v1/verify vocabulary and are never extended for harness purposes.
+export const RISK_DECISIONS = Object.freeze(['ALLOW', 'REVIEW', 'BLOCK']);
+
+export const RISK_REASON_CODES = Object.freeze([
+  'CLEAR',
+  'IDENTITY_DENIED',
+  'DELEGATION_DENIED',
+  'DELEGATION_MAX_EXCEEDED',
+  'DAILY_LIMIT_EXCEEDED',
+  'WALLET_NOT_APPROVED',
+  'ASSET_NOT_PERMITTED',
+  'SANCTIONS_EXACT_MATCH',
+  'SANCTIONS_FUZZY_MATCH',
+  'PASSPORT_SUSPENDED',
+  'PASSPORT_REVOKED',
+  'PASSPORT_UNDER_REVIEW',
+  'PASSPORT_RE_SCREENING',
+  'MEMORY_PRECEDENT_TAKEOVER',
+  'BEHAVIOR_ESCALATION',
+  'HARNESS_INVARIANTS_MISMATCH',
+  'INTERNAL_ERROR',
+]);
+
 export const ERROR_CODES = Object.freeze({
   VALIDATION_ERROR: 400,
   UNAUTHENTICATED: 401,

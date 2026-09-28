@@ -130,6 +130,34 @@ test('verifier fails closed: unreachable, timeout, bad key, garbage, forged ALLO
   }
 });
 
+test('verifier tolerates an optional riskDecision, passes it through, never turns REVIEW/BLOCK into ALLOW', async () => {
+  const key = `kya_key_${'0'.repeat(26)}_${'A'.repeat(43)}`;
+  const request = { agentId: 'agt_X', action: 'payments:create', signedRequest: {} };
+  const reply = (payload) => createVerifier({ baseUrl: 'https://kya.example.com', apiKey: key, fetch: async () => new Response(JSON.stringify(payload), { status: 200 }) });
+  const allow = { decision: 'ALLOW', reasons: [{ code: 'ALLOWED' }], agentId: 'agt_X', action: 'payments:create' };
+
+  const plain = await reply(allow).verify(request);
+  assert.ok(isAllowed(plain));
+  assert.equal(plain.riskDecision, undefined);
+
+  const tagged = await reply({ ...allow, riskDecision: 'ALLOW' }).verify(request);
+  assert.ok(isAllowed(tagged));
+  assert.equal(tagged.riskDecision, 'ALLOW');
+
+  const deny = await reply({ decision: 'DENY', reasons: [{ code: 'CONSTRAINT_VIOLATION' }], riskDecision: 'BLOCK' }).verify(request);
+  assert.equal(deny.decision, 'DENY');
+  assert.equal(deny.riskDecision, 'BLOCK');
+  assert.equal(deny.reasons[0].code, 'CONSTRAINT_VIOLATION');
+
+  for (const riskDecision of ['REVIEW', 'BLOCK', 'MAYBE']) {
+    const d = await reply({ ...allow, riskDecision }).verify(request);
+    assert.equal(d.decision, 'DENY', riskDecision);
+    assert.equal(d.reasons[0].code, 'INTERNAL_ERROR');
+    assert.ok(!isAllowed(d));
+  }
+  assert.ok(!isAllowed({ ...allow, riskDecision: 'REVIEW' }));
+});
+
 test('verifier config is strict: https only (except loopback), well-formed key', () => {
   const key = `kya_key_${'0'.repeat(26)}_${'A'.repeat(43)}`;
   assert.throws(() => createVerifier({ baseUrl: 'http://kya.example.com', apiKey: key }), KyaSdkError);
