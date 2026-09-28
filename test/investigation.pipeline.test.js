@@ -46,11 +46,12 @@ describe('memory retrieval / skeleton pipeline without Atlas', () => {
     assert.deepEqual(r.stages.map((s) => [s.name, s.status]), [
       ['identity', 'passed'],
       ['delegation', 'passed'],
+      ['sanctions', 'passed'],
       ['signals', r.signals.length ? 'flagged' : 'passed'],
       ['memory', 'error'],
       ['decision', 'failed'],
     ]);
-    assert.equal(r.stages[3].engine, '$vectorSearch');
+    assert.equal(r.stages[4].engine, '$vectorSearch');
     assert.equal(r.riskDecision, 'BLOCK');
     assert.equal(r.reasons[0].code, 'INTERNAL_ERROR');
   });
@@ -58,10 +59,32 @@ describe('memory retrieval / skeleton pipeline without Atlas', () => {
   test('unknown agent short-circuits to BLOCK IDENTITY_DENIED', async () => {
     const store = await world();
     const r = await runInvestigation({ store, agentId: 'agt_NOPE', delegationId: 'grt_TB_USDC', tx: tx(), now: NOW });
-    assert.deepEqual(r.stages.slice(1, 4).map((s) => s.status), ['skipped', 'skipped', 'skipped']);
+    assert.deepEqual(r.stages.slice(1, 5).map((s) => s.status), ['skipped', 'skipped', 'skipped', 'skipped']);
     assert.equal(r.riskDecision, 'BLOCK');
     assert.equal(r.reasons[0].code, 'IDENTITY_DENIED');
     assert.equal(r.reasons[0].identityReasonCode, 'AGENT_NOT_FOUND');
+  });
+
+  test('exact sanctioned wallet BLOCKs without $search; a failing fuzzy screen keeps the exact reason', async () => {
+    const store = await world();
+    const lazarus = docs.sanctions.find((s) => s._id === 'sdn_LAZARUS');
+    await store.sanctions.insert(fromDoc(lazarus));
+    const address = lazarus.wallets[0].address;
+
+    const plain = await runInvestigation({ store, agentId: 'agt_TREASURYBOT', delegationId: 'grt_TB_USDC', tx: tx({ counterparty: { address } }), now: NOW });
+    const s = plain.stages[2];
+    assert.equal(s.name, 'sanctions');
+    assert.equal(s.status, 'failed');
+    assert.deepEqual(s.result.exactHits.map((h) => h.sanctionsId), ['sdn_LAZARUS']);
+    assert.equal(plain.reasons[0].code, 'SANCTIONS_EXACT_MATCH');
+    assert.equal(plain.reasons[0].invariantId, 'INV_SANCTIONS_EXACT_BLOCK');
+
+    // A name forces the Atlas-only $search, which throws AtlasRequiredError on MemoryStore.
+    const named = await runInvestigation({ store, agentId: 'agt_TREASURYBOT', delegationId: 'grt_TB_USDC', tx: tx({ counterparty: { address, name: 'Lazarus Grp' } }), now: NOW });
+    assert.equal(named.stages[2].status, 'error');
+    assert.equal(named.riskDecision, 'BLOCK');
+    assert.deepEqual(named.reasons.map((r) => r.code), ['SANCTIONS_EXACT_MATCH', 'INTERNAL_ERROR']);
+    assert.ok(named.stages[2].evidence.some((e) => e.kind === 'sanctions_exact' && e.ref === 'sdn_LAZARUS'));
   });
 
   test('over the delegation maximum records INV_DELEGATION_MAX (memory still fails closed)', async () => {
