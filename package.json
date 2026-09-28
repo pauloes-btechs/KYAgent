@@ -15,6 +15,7 @@
     "demo": "node scripts/demo.js",
     "demo:reset": "node scripts/demo-reset.js",
     "demo:seed": "node scripts/demo-seed.js",
+    "sanctions:apply": "node scripts/apply-sanctions-update.js",
     "example:sdk": "node examples/sdk-quickstart.js",
     "test": "node --test",
     "test:atlas": "node --test test/atlas/",

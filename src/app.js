@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { RESOURCE_ID_RE } from './contracts.js';
 import { jwks } from './crypto/credentials.js';
 import { ApiError, toApiError, validationError } from './errors.js';
+import { createEventHub } from './events.js';
 import { newId } from './ids.js';
 import { createLogger } from './logger.js';
 import { createRateLimits, principalKey } from './rateLimit.js';
@@ -37,6 +38,9 @@ const DASHBOARD_CSP =
   "base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 const ALL = ['admin', 'operator', 'business'];
+// GET /v1/events/stream: keep-alive comment interval and a global cap on open streams.
+const SSE_KEEPALIVE_MS = 15_000;
+const SSE_MAX_STREAMS = 20;
 const q = {
   str64: { type: 'string', max: 64 },
   operatorStatus: { enum: ['pending', 'verified', 'rejected', 'suspended'] },
@@ -136,7 +140,7 @@ function parseQuery(url, spec, paginated) {
   return out;
 }
 
-export function buildApp({ config, store, clock = systemClock, logger = createLogger(config.logLevel), llm = null }) {
+export function buildApp({ config, store, clock = systemClock, logger = createLogger(config.logLevel), llm = null, events = createEventHub({ clock }) }) {
   const audit = auditService({ store, clock });
   const deps = { store, clock, config, audit };
   const services = {
@@ -193,9 +197,20 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
 
     { m: 'POST', p: '/v1/verify', roles: ['business'], body: 'verify', rateLimit: 'verify', h: null },
     // Investigation pipeline (trigger `api`); the handler returns { status, body }: 201, or 500 fail-closed BLOCK.
-    { m: 'POST', p: '/v1/investigations', roles: ['admin', 'business'], body: 'json', rateLimit: 'verify', dynamicStatus: true, h: (c) => s.investigations.create(c.principal, c.body, c.requestId) },
+    { m: 'POST', p: '/v1/investigations', roles: ['admin', 'business'], body: 'json', rateLimit: 'verify', dynamicStatus: true, h: async (c) => {
+      const r = await s.investigations.create(c.principal, c.body, c.requestId);
+      events.publish('investigation.decided', { investigationId: r.body.id, agentId: r.body.agentId, trigger: r.body.trigger, riskDecision: r.body.riskDecision });
+      return r;
+    } },
     // Human confirmation + harness adaptation (harness.md §6). INV_NO_SELF_APPROVAL is enforced in the service.
-    { m: 'POST', p: '/v1/investigations/:id/confirm', roles: ['admin'], body: 'json', h: (c) => s.investigations.confirm(c.principal, c.id, c.body) },
+    { m: 'POST', p: '/v1/investigations/:id/confirm', roles: ['admin'], body: 'json', h: async (c) => {
+      const r = await s.investigations.confirm(c.principal, c.id, c.body);
+      const a = r.adaptation;
+      if (a?.applied) events.publish('harness.adapted', { fromVersion: a.fromVersion, toVersion: a.toVersion, eventId: a.eventId });
+      return r;
+    } },
+    // Server-Sent Events (openapi streamEvents): handled by openEventStream, one stream per API key.
+    { m: 'GET', p: '/v1/events/stream', roles: ['admin'], sse: true, h: null },
     { m: 'GET', p: '/v1/harness/versions', roles: ['admin', 'business'], h: () => s.investigations.listHarnessVersions() },
     { m: 'GET', p: '/v1/harness/events', roles: ['admin', 'business'], h: (c) => s.investigations.listHarnessEvents(c.principal, c.query) },
     { m: 'GET', p: '/v1/audit-events', roles: ['admin'], query: { type: q.auditType, subjectId: q.str64 }, h: (c) => s.audit.list(c.principal, c.query) },
@@ -257,6 +272,41 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
       'X-Request-Id': requestId,
     });
     res.end(file.body);
+  }
+
+  // One stream per API key: a new stream for the same key replaces (closes) the previous one.
+  const streams = new Map();
+  function openEventStream(req, res, principal, requestId) {
+    const key = principal.apiKeyId ?? 'bootstrap';
+    streams.get(key)?.();
+    if (streams.size >= SSE_MAX_STREAMS) throw new ApiError('SERVICE_UNAVAILABLE');
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-store',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+      'X-Request-Id': requestId,
+    });
+    res.write('retry: 3000\n: connected\n\n');
+    const unsubscribe = events.subscribe(({ type, data }) => {
+      res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
+    });
+    const keepAlive = setInterval(() => res.write(': keep-alive\n\n'), SSE_KEEPALIVE_MS);
+    keepAlive.unref?.();
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      clearInterval(keepAlive);
+      unsubscribe();
+      if (streams.get(key) === close) streams.delete(key);
+      res.end();
+    };
+    streams.set(key, close);
+    req.on('close', close);
+    res.on('error', close);
   }
 
   function enforceLimit(limiter, key) {
@@ -327,6 +377,11 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
       if (!route.roles.includes(principal.role)) throw new ApiError('FORBIDDEN');
       if (route.rateLimit && limits.enabled) enforceLimit(limits[route.rateLimit], principalKey(principal));
 
+      if (route.sse) {
+        parseQuery(url, {}, false); // no query parameters
+        return openEventStream(req, res, principal, requestId);
+      }
+
       const { raw, tooLarge } = await bodyPromise;
 
       if (route.body === 'verify') {
@@ -375,6 +430,7 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
     services,
     store,
     config,
+    events,
     async init() {
       await store.init();
       if (config.bootstrapAdminApiKey) {
@@ -386,6 +442,7 @@ export function buildApp({ config, store, clock = systemClock, logger = createLo
       return new Promise((resolve) => server.listen(port, host, () => resolve(server.address())));
     },
     async close() {
+      for (const close of [...streams.values()]) close();
       const closed = new Promise((resolve) => server.close(() => resolve()));
       server.closeAllConnections?.();
       await closed;
