@@ -15,6 +15,7 @@ and crypto.
 | [`docs/contracts/openapi.yaml`](docs/contracts/openapi.yaml) | OpenAPI 3.1 spec for every endpoint. A running server also serves it at `GET /openapi.yaml`. |
 | [`docs/guides/business-integration.md`](docs/guides/business-integration.md) | Businesses (relying parties): grants, `POST /v1/verify`, reason codes |
 | [`docs/guides/operator-integration.md`](docs/guides/operator-integration.md) | Operators: agent keys, registration, credentials, request signing, revocation |
+| [`docs/DEMO.md`](docs/DEMO.md) | Hackathon demo runbook: Atlas prerequisites, the five demos, fallback modes, recovery |
 
 ## Quick start (about 5 minutes)
 
@@ -36,6 +37,9 @@ make demo-reset        # restore the exact judging scenario (idempotent)
 make demo              # API + dashboard on Atlas over that scenario
 make demo CHECK=1      # headless scenario + search-index check
 ```
+
+The full judging runbook, covering prerequisites, the five-demo walkthrough, the three-minute
+version, fallback modes and recovery, is in [`docs/DEMO.md`](docs/DEMO.md).
 
 `make demo-reset` removes the demo documents, empties `investigations`,
 `harness_events`, `watcher_state`, `passports` and `receipts`, runs the migrations,

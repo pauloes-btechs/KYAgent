@@ -102,10 +102,27 @@ export async function detectCapabilities(db, probeCollection = 'operators') {
   return Object.freeze({ atlasSearch, changeStreams });
 }
 
+// Roles the runtime (API + sanctions watcher) may hold, and only on the app database.
+export const LEAST_PRIVILEGE_ROLES = Object.freeze(['readWrite', 'read']);
+
+/**
+ * Least-privilege check of the connected MongoDB user (`connectionStatus`). `ok` only when the user
+ * is authenticated, holds readWrite on `dbName` and holds nothing else (no admin / AnyDatabase /
+ * atlasAdmin roles, no roles on other databases). Role names and databases are not secrets.
+ */
+export async function checkDbPrivileges(db, dbName) {
+  const status = await db.command({ connectionStatus: 1 });
+  const roles = (status?.authInfo?.authenticatedUserRoles ?? []).map((r) => ({ role: r.role, db: r.db }));
+  const excess = roles.filter((r) => !(r.db === dbName && LEAST_PRIVILEGE_ROLES.includes(r.role)));
+  const hasReadWrite = roles.some((r) => r.db === dbName && r.role === 'readWrite');
+  return { ok: hasReadWrite && excess.length === 0, roles, excess, authenticated: roles.length > 0 };
+}
+
 export class MongoStore {
   constructor(uri, dbName) {
     this.kind = 'mongo';
-    this._uri = uri;
+    // Non-enumerable (like config.mongoUri): logging or serialising the store never carries MONGODB_URI.
+    Object.defineProperty(this, '_uri', { value: uri, enumerable: false });
     this._dbName = dbName;
     this.capabilities = Object.freeze({ atlasSearch: false, changeStreams: false });
   }
@@ -206,6 +223,11 @@ export class MongoStore {
     this.harnessVersions = harnessRepo(c('harness_versions'));
     this.harnessEvents = harnessRepo(c('harness_events'), 'at');
     this.watcherState = harnessRepo(c('watcher_state'), 'updatedAt');
+  }
+
+  /** See checkDbPrivileges(). */
+  async privileges() {
+    return checkDbPrivileges(this._db, this._dbName);
   }
 
   async ping() {
