@@ -74,7 +74,8 @@ describe('atlas: Demo 3 end-to-end (POST /v1/investigations)', { skip, timeout: 
     });
     businessKey = biz.plaintext;
 
-    await ensureSearchIndexes(store.db, loadSearchIndexDefs().filter((d) => d.name === 'memory_vector'), { timeoutMs: 180_000 });
+    // Both indexes: the sanctions stage screens the signed counterpartyName with $search.
+    await ensureSearchIndexes(store.db, loadSearchIndexDefs(), { timeoutMs: 180_000 });
     const deadline = Date.now() + 120_000;
     for (;;) {
       const r = await retrieveMemories({ db: store.db, signals: DEMO3_CASE.expectedSignals, minScorePpm: 0 }).catch(() => null);
@@ -101,14 +102,14 @@ describe('atlas: Demo 3 end-to-end (POST /v1/investigations)', { skip, timeout: 
     assert.equal(inv.trigger, 'api');
     assert.equal(inv.businessId, DEMO_IDS.business);
     assert.equal(inv.delegationId, DEMO_IDS.delegation);
-    assert.deepEqual(inv.stages.map((s) => s.name), ['identity', 'delegation', 'signals', 'memory', 'decision']);
+    assert.deepEqual(inv.stages.map((s) => s.name), ['identity', 'delegation', 'sanctions', 'signals', 'memory', 'decision']);
     assert.equal(inv.stages[0].result.mode, 'signed');
     assert.equal(inv.stages[0].result.reasonCode, 'ALLOWED');
     assert.equal(inv.stages[0].evidence[0].data.signature, 'valid');
     assert.equal(inv.stages[0].evidence[0].data.nonce, 'fresh');
     assert.equal(inv.stages[1].status, 'passed');
     assert.deepEqual([...inv.signals].sort(), [...DEMO3_CASE.expectedSignals]);
-    assert.equal(inv.stages[3].engine, '$vectorSearch');
+    assert.equal(inv.stages[4].engine, '$vectorSearch');
     assert.equal(inv.memory.engine, '$vectorSearch');
     const top = inv.memory.hits[0];
     assert.equal(top.memoryId, 'mem_INV-1042');
@@ -133,7 +134,7 @@ describe('atlas: Demo 3 end-to-end (POST /v1/investigations)', { skip, timeout: 
     assert.equal(doc.harnessVersion, 1);
     assert.equal(doc.memory.hits[0].memoryId, 'mem_INV-1042');
     assert.equal(doc.memory.hits[0].status, 'VERIFIED');
-    assert.equal(doc.stages.length, 5);
+    assert.equal(doc.stages.length, 6);
 
     const { MongoClient } = await import('mongodb');
     const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10_000 });
@@ -157,7 +158,7 @@ describe('atlas: Demo 3 end-to-end (POST /v1/investigations)', { skip, timeout: 
     assert.equal(inv.riskDecision, 'BLOCK');
     assert.equal(inv.reasons[0].code, 'IDENTITY_DENIED');
     assert.equal(inv.reasons[0].identityReasonCode, 'NONCE_REPLAYED');
-    assert.deepEqual(inv.stages.slice(1, 4).map((s) => s.status), ['skipped', 'skipped', 'skipped']);
+    assert.deepEqual(inv.stages.slice(1, 5).map((s) => s.status), ['skipped', 'skipped', 'skipped', 'skipped']);
     assert.deepEqual(inv.memory.hits, []);
   });
 

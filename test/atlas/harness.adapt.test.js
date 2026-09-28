@@ -81,7 +81,8 @@ describe('atlas: Demo 5 adaptive harness (confirm -> memory VERIFIED -> harness 
     });
     businessKey = biz.plaintext;
 
-    await ensureSearchIndexes(store.db, loadSearchIndexDefs().filter((d) => d.name === 'memory_vector'), { timeoutMs: 180_000 });
+    // Both indexes: the sanctions stage screens the signed counterpartyName with $search.
+    await ensureSearchIndexes(store.db, loadSearchIndexDefs(), { timeoutMs: 180_000 });
     const deadline = Date.now() + 120_000;
     for (;;) {
       const r = await retrieveMemories({ db: store.db, signals: DEMO3_CASE.expectedSignals, minScorePpm: 0 }).catch(() => null);
@@ -108,7 +109,7 @@ describe('atlas: Demo 5 adaptive harness (confirm -> memory VERIFIED -> harness 
 
     caseB = await investigate(businessKey);
     assert.equal(caseB.harnessVersion, 1);
-    assert.deepEqual(caseB.stages.map((s) => s.name), ['identity', 'delegation', 'signals', 'memory', 'decision']);
+    assert.deepEqual(caseB.stages.map((s) => s.name), ['identity', 'delegation', 'sanctions', 'signals', 'memory', 'decision']);
     assert.ok(!caseB.stages.some((s) => s.name === STEP));
     assert.equal(caseB.memory.k, 3);
     assert.equal((await col('investigations').findOne({ _id: caseB.id })).harnessVersion, 1);
@@ -207,7 +208,7 @@ describe('atlas: Demo 5 adaptive harness (confirm -> memory VERIFIED -> harness 
     assert.equal(b2.harnessVersion, 2);
     const names = b2.stages.map((s) => s.name);
     assert.equal(names.length, caseB.stages.length + 1);
-    assert.deepEqual(names, ['identity', 'delegation', 'signals', 'memory', STEP, 'decision']);
+    assert.deepEqual(names, ['identity', 'delegation', 'sanctions', 'signals', 'memory', STEP, 'decision']);
     const step = b2.stages.find((s) => s.name === STEP);
     assert.equal(step.engine, 'find+aggregate');
     assert.equal(step.status, 'flagged');
@@ -222,7 +223,7 @@ describe('atlas: Demo 5 adaptive harness (confirm -> memory VERIFIED -> harness 
     assert.equal(b2.riskDecision, 'REVIEW');
     const doc = await col('investigations').findOne({ _id: b2.id });
     assert.equal(doc.harnessVersion, 2);
-    assert.equal(doc.stages.length, 6);
+    assert.equal(doc.stages.length, 7);
   });
 
   test('the promoted memory is retrievable from Atlas Vector Search as a VERIFIED precedent', async () => {
