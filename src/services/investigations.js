@@ -335,7 +335,114 @@ export function investigationService({ store, clock, config, audit, llm = null }
       } catch {
         throw new ApiError('INTERNAL_ERROR');
       }
+      // REVIEW ⇒ UNVERIFIED candidate memory (investigation-pipeline.md §6). It is inert until a
+      // human verifies it, so a failure here cannot change the decision; confirm() rebuilds it.
+      if (doc.riskDecision === 'REVIEW') {
+        await buildCaseMemory(doc, now)
+          .then((m) => store.securityMemories.insert(m))
+          .catch(() => {});
+      }
       return { status, body: investigationOut(doc) };
+    },
+
+    /**
+     * POST /v1/investigations/{id}/confirm (harness.md §6). Admin only (route) and
+     * INV_NO_SELF_APPROVAL: 403 with nothing written when the approver initiated the case or owns
+     * its agent / principal / business. Promotes the case memory (VERIFIED, or REJECTED for CLEAN);
+     * for a VERIFIED memory the adaptation proposal is recorded — applied as harness vN+1 only when
+     * `approveAdaptation` is true and the proposal passes every check.
+     */
+    async confirm(principal, id, body) {
+      const inv = await store.investigations.findById(id);
+      if (!inv) throw new ApiError('NOT_FOUND');
+      const req = parseConfirm(body);
+      const approver = actorOf(principal);
+      if (!holds('INV_NO_SELF_APPROVAL', { approver, subject: inv })) {
+        throw new ApiError('FORBIDDEN', 'INV_NO_SELF_APPROVAL: the approver may not confirm its own case');
+      }
+      if (!CONFIRMABLE.includes(inv.status) || inv.outcome != null) throw new ApiError('INVALID_STATE', 'Investigation is already confirmed');
+      const harness = await loadActiveHarness(store);
+      const now = clock.now();
+
+      // Case memory (created at REVIEW time, or now); its embedding is re-checked against its signals.
+      let mem = await store.securityMemories.findById(caseMemoryId(inv.id));
+      if (!mem) {
+        const built = await buildCaseMemory(inv, now);
+        mem = await store.securityMemories.insert(built).catch(() => store.securityMemories.findById(built.id));
+        if (!mem) throw new ApiError('INTERNAL_ERROR');
+      }
+      if (mem.status !== 'UNVERIFIED') throw new ApiError('INVALID_STATE', 'Case memory is not UNVERIFIED');
+      const fresh = await embedWithMeta(signalsText(mem.signals));
+      if (fresh.embeddingTextSha256 !== mem.embeddingTextSha256) throw new ApiError('INTERNAL_ERROR', 'Case memory embedding does not match its signals');
+
+      // Single winner: only one confirmation can move the case out of DECIDED / AWAITING_REVIEW.
+      const confirmed = await store.investigations.updateIf(inv.id, CONFIRMABLE, {
+        status: 'CONFIRMED',
+        outcome: req.outcome,
+        confirmedBy: approver,
+        confirmedAt: now,
+        confirmationNote: req.note,
+      });
+      if (!confirmed) throw new ApiError('INVALID_STATE', 'Investigation is already confirmed');
+      const undoConfirm = () =>
+        store.investigations.updateIf(inv.id, ['CONFIRMED'], { status: inv.status, outcome: null, confirmedBy: null, confirmedAt: null, confirmationNote: null });
+
+      const verified = req.outcome !== 'CLEAN';
+      const memPatch = verified
+        ? {
+            status: 'VERIFIED',
+            outcome: req.outcome,
+            verifiedBy: approver,
+            verifiedAt: now,
+            embedding: fresh.embedding,
+            embeddingModel: fresh.embeddingModel,
+            embeddingTextSha256: fresh.embeddingTextSha256,
+          }
+        : { status: 'REJECTED', outcome: req.outcome, verifiedBy: approver, verifiedAt: now };
+      const promoted = await store.securityMemories.updateIf(mem.id, ['UNVERIFIED'], memPatch);
+      if (!promoted) {
+        await undoConfirm().catch(() => {});
+        throw new ApiError('INVALID_STATE', 'Case memory is not UNVERIFIED');
+      }
+      // An unaudited promotion must not stand (it would make the memory a precedent).
+      await audit.recordOrCompensate(
+        principal,
+        verified ? 'memory.promoted' : 'memory.rejected',
+        { type: 'security_memory', id: mem.id },
+        { investigationId: inv.id, outcome: req.outcome, status: memPatch.status },
+        async () => {
+          await store.securityMemories.updateIf(mem.id, [memPatch.status], { status: 'UNVERIFIED', outcome: null, verifiedBy: null, verifiedAt: null });
+          await undoConfirm();
+        },
+      );
+      await audit.record(principal, 'investigation.confirmed', { type: 'investigation', id: inv.id }, {
+        outcome: req.outcome,
+        memoryId: mem.id,
+        memoryStatus: memPatch.status,
+        approveAdaptation: req.approveAdaptation,
+      });
+
+      const adaptation = { proposed: false, applied: false, eventId: null, fromVersion: harness.version, toVersion: null, diff: [] };
+      const proposal = verified
+        ? await proposeFromOutcome(investigationOut(confirmed), promoted, { policy: harness.policy, mode: config.modes?.llm ?? 'fixture', llm })
+        : null;
+      if (proposal) {
+        adaptation.proposed = true;
+        adaptation.diff = proposal.diff;
+        Object.assign(adaptation, await recordAdaptation({ principal, approver, inv, mem, harness, proposal, approve: req.approveAdaptation, now }));
+      }
+      return { investigation: investigationOut(confirmed), memory: { id: mem.id, status: memPatch.status }, adaptation };
+    },
+
+    /** GET /v1/harness/versions: newest first, plus the runtime INVARIANTS_HASH. */
+    async listHarnessVersions() {
+      return { data: (await listHarnessVersions(store)).map(harnessVersionOut), invariantsHash: INVARIANTS_HASH };
+    },
+
+    /** GET /v1/harness/events: adaptation events, newest first. */
+    async listHarnessEvents(principal, q) {
+      const page = await store.harnessEvents.list({ limit: q.limit, cursor: q.cursor });
+      return { data: page.data.map(harnessEventOut), nextCursor: page.nextCursor };
     },
   };
 }
