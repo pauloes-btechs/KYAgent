@@ -1,0 +1,632 @@
+<title>KYAgent Live Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  --slate:#001E2B; --slate-2:#0B2C3A; --slate-3:#1C4555; --slate-line:#23505F;
+  --forest:#00684A; --spring:#00ED64; --mint:#E3FCF7; --mint-line:#9BD8C4;
+  --paper:#F9FBFA; --card:#FFFFFF; --ink:#1C2D38; --ink-2:#3D4F58; --gray:#5C6C75; --gray-2:#889397; --line:#E1E7EA; --soft:#F1F4F5;
+  --block:#C52B2B; --block-bg:#FFEAE5; --block-line:#F6C7BE;
+  --review:#946F01; --review-bg:#FFF8E1; --review-pill:#FFC010; --review-line:#F3D98A;
+  --allow:#00A35C; --allow-bg:#E3FCF7;
+  --sans:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--forest);outline-offset:2px}
+.mono{font-family:var(--mono)}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:24px}
+@media (max-width:640px){.wrap{padding-inline:16px}}
+
+/* ---------- header band ---------- */
+.band{background:var(--slate);color:#E3F1EC;position:relative;overflow:hidden}
+.band::before{content:"";position:absolute;inset:0;background:radial-gradient(900px 420px at 88% -10%,rgba(0,104,74,.55),transparent 60%);pointer-events:none}
+.band::after{content:"";position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.06) 1px,transparent 1.2px);background-size:24px 24px;pointer-events:none}
+.band .wrap{position:relative;z-index:1;padding-block:28px 0}
+.brandrow{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px 32px}
+.eyebrow{font:600 12px/1 var(--sans);letter-spacing:.2em;text-transform:uppercase;color:var(--spring)}
+.brand{margin:10px 0 0;font:700 34px/1.1 var(--sans);letter-spacing:-.01em;color:#fff}
+.brand span{font-weight:400;color:#9FB6BF}
+.lede{margin:10px 0 0;max-width:62ch;color:#B9CBD2;font-size:15px}
+.liststatus{display:grid;grid-template-columns:repeat(3,auto);gap:4px 28px;background:rgba(10,39,51,.8);border:1px solid var(--slate-line);border-radius:12px;padding:14px 18px}
+.liststatus dt{font:600 10.5px/1.2 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:#7F97A2}
+.liststatus dd{margin:4px 0 0;font:600 16px/1.2 var(--mono);color:#fff;font-variant-numeric:tabular-nums}
+.liststatus .live{display:inline-flex;align-items:center;gap:8px}
+.liststatus .live::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--spring);box-shadow:0 0 0 4px rgba(0,237,100,.15)}
+@media (max-width:640px){.liststatus{grid-template-columns:repeat(2,auto)}}
+.tabs{display:flex;gap:4px;margin-top:26px;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{appearance:none;border:0;background:transparent;color:#9FB6BF;padding:12px 16px 14px;font:500 14px/1 var(--sans);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+.tab:hover{color:#fff}
+.tab[aria-selected="true"]{color:#fff;border-bottom-color:var(--spring)}
+.tab .n{font:500 11px/1 var(--mono);color:#7F97A2;margin-right:8px}
+
+/* ---------- layout ---------- */
+main{padding-block:28px 56px}
+.panel[hidden]{display:none}
+.grid{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:24px;align-items:start}
+@media (max-width:920px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px}
+.card h2{margin:0;font:600 18px/1.3 var(--sans);text-wrap:balance}
+.card .sub{margin:6px 0 0;color:var(--gray);font-size:14px;max-width:60ch}
+.label{display:block;font:600 12px/1 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--gray);margin:18px 0 8px}
+.field{width:100%;border:1px solid var(--line);background:var(--paper);border-radius:10px;padding:11px 12px;font:14px/1.45 var(--mono);color:var(--ink);resize:vertical}
+.field:focus{border-color:var(--forest);background:#fff;outline:none;box-shadow:0 0 0 3px rgba(0,104,74,.12)}
+textarea.field{min-height:120px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.btn{appearance:none;border:1px solid var(--slate);background:var(--slate);color:#fff;border-radius:10px;padding:10px 16px;font:600 14px/1 var(--sans);cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.btn:hover{background:var(--slate-2)}
+.btn.ghost{background:#fff;color:var(--ink);border-color:var(--line)}
+.btn.ghost:hover{border-color:var(--gray-2)}
+.btn.small{padding:7px 11px;font-size:13px}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.chipbtn{appearance:none;border:1px dashed var(--mint-line);background:var(--mint);color:var(--forest);border-radius:999px;padding:6px 12px;font:500 12.5px/1 var(--sans);cursor:pointer}
+.chipbtn:hover{border-style:solid}
+.hint{color:var(--gray);font-size:13px;margin:10px 0 0}
+.note{margin-top:18px;border-left:3px solid var(--mint-line);padding:10px 14px;background:var(--mint);border-radius:0 10px 10px 0;color:var(--ink-2);font-size:13.5px}
+.note b{color:var(--forest)}
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:4px 11px;font:600 12px/1.2 var(--mono);letter-spacing:.02em;white-space:nowrap}
+.pill.block{background:var(--block);color:#fff}
+.pill.review{background:var(--review-pill);color:#3D2B00}
+.pill.allow{background:var(--spring);color:var(--slate)}
+.pill.clear{background:var(--allow-bg);color:var(--forest);border:1px solid var(--mint-line)}
+.pill.neutral{background:var(--soft);color:var(--ink-2);border:1px solid var(--line)}
+.tag{display:inline-block;font:500 11.5px/1.3 var(--mono);color:var(--ink-2);background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:2px 7px}
+.detect{font:500 12px/1 var(--mono);color:var(--gray)}
+
+/* ---------- results ---------- */
+.results{display:flex;flex-direction:column;gap:14px}
+.empty{border:1px dashed var(--line);border-radius:14px;padding:28px;color:var(--gray);text-align:left;background:#fff}
+.res{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.res.is-block{border-color:var(--block-line)}
+.res.is-review{border-color:var(--review-line)}
+.res-h{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--line)}
+.res.is-block .res-h{background:var(--block-bg)}
+.res.is-review .res-h{background:var(--review-bg)}
+.res-addr{font:500 13.5px/1.4 var(--mono);word-break:break-all;min-width:0;flex:1 1 280px}
+.res-b{padding:14px 18px;display:grid;grid-template-columns:140px minmax(0,1fr);gap:8px 16px;font-size:14px}
+.res-b dt{color:var(--gray);font-size:12.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding-top:2px}
+.res-b dd{margin:0;min-width:0;overflow-wrap:anywhere}
+@media (max-width:560px){.res-b{grid-template-columns:1fr}.res-b dt{padding-top:6px}}
+.matchrow{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:6px 16px;align-items:center;padding:12px 18px;border-top:1px solid var(--line)}
+.matchrow:first-child{border-top:0}
+.matchrow .nm{font-weight:600}
+.matchrow .meta{grid-column:1;color:var(--gray);font-size:12.5px}
+.score{grid-row:1 / span 2;grid-column:2;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.bar{width:100%;height:6px;border-radius:3px;background:var(--soft);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--forest)}
+.bar.hot i{background:var(--review-pill)}
+.scoreval{font:600 13px/1 var(--mono);font-variant-numeric:tabular-nums}
+@media (max-width:560px){.matchrow{grid-template-columns:1fr}.score{grid-row:auto;grid-column:1;align-items:flex-start}}
+.slider{display:flex;align-items:center;gap:12px}
+.slider input{flex:1;accent-color:var(--forest)}
+
+/* ---------- pipeline ---------- */
+.form2{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
+.form2 .full{grid-column:1 / -1}
+@media (max-width:560px){.form2{grid-template-columns:1fr}}
+select.field{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--gray) 50%),linear-gradient(135deg,var(--gray) 50%,transparent 50%);background-position:calc(100% - 18px) 50%,calc(100% - 13px) 50%;background-size:5px 5px;background-repeat:no-repeat;padding-right:32px;font-family:var(--sans)}
+.dec{background:var(--slate);color:#E3F1EC;border-radius:14px;padding:20px 22px;position:relative;overflow:hidden}
+.dec-h{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between}
+.dec-id{font:500 12.5px/1.3 var(--mono);color:#9FB6BF}
+.dec-id b{color:#fff;font-weight:600}
+.hv{font:600 11.5px/1 var(--mono);color:var(--slate);background:var(--spring);border-radius:999px;padding:5px 10px}
+.stages{list-style:none;margin:16px 0 0;padding:0;display:flex;flex-direction:column}
+.stage{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:4px 12px;padding:10px 0;border-top:1px solid var(--slate-line);opacity:.35;transition:opacity .25s}
+.stage.on{opacity:1}
+.stage:first-child{border-top:0}
+.dot{width:10px;height:10px;border-radius:50%;margin-top:6px;background:#3D5A66}
+.st-pass .dot{background:var(--spring)}
+.st-flag .dot{background:var(--review-pill)}
+.st-fail .dot{background:#FF6B5E}
+.st-skip .dot{background:transparent;border:1.5px solid #4E6B77}
+.st-adapt .nm::after{content:"adaptive";margin-left:8px;font:600 10px/1 var(--mono);color:var(--review-pill);border:1px solid rgba(255,192,16,.5);border-radius:999px;padding:2px 6px;vertical-align:2px}
+.stage .nm{font:600 14px/1.4 var(--mono);color:#fff}
+.stage .eng{font:500 12px/1.4 var(--mono);color:#7F97A2;text-align:right}
+.stage .ev{grid-column:2 / -1;color:#B9CBD2;font-size:13px;line-height:1.5}
+.stage .ev code{font:500 12px var(--mono);color:#E3F1EC;background:rgba(255,255,255,.06);border-radius:4px;padding:1px 5px}
+.dec-f{margin-top:14px;padding-top:14px;border-top:1px solid var(--slate-line);display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;justify-content:space-between}
+.reasons{display:flex;flex-wrap:wrap;gap:6px}
+.reasons .r{font:500 11.5px/1 var(--mono);color:#E3F1EC;border:1px solid var(--slate-line);border-radius:6px;padding:5px 8px}
+.bigpill{font-size:14px;padding:7px 14px}
+.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+.actions .btn{background:#fff;color:var(--slate);border-color:#fff}
+.actions .btn.ghost{background:transparent;color:#E3F1EC;border-color:var(--slate-line)}
+.receipt{margin-top:14px;background:#06222E;border:1px solid var(--slate-line);border-radius:10px;padding:12px 14px;font:12px/1.55 var(--mono);color:#B9CBD2;white-space:pre;overflow-x:auto;max-height:260px}
+.adapt{margin-top:14px;border:1px solid rgba(255,192,16,.45);background:rgba(255,192,16,.08);border-radius:10px;padding:12px 14px;font-size:13.5px;color:#F4E3B0}
+.adapt code{font:500 12px var(--mono);color:#fff}
+.sim{margin-top:10px;font-size:12.5px;color:var(--gray)}
+
+/* ---------- audit ---------- */
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:#fff}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:13.5px}
+th{text-align:left;font:600 11.5px/1.2 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--gray);background:var(--soft);padding:10px 14px;border-bottom:1px solid var(--line)}
+td{padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.h{font:12px/1.4 var(--mono);color:var(--gray);font-variant-numeric:tabular-nums}
+tr.broken td{background:var(--block-bg)}
+.integrity{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;margin:16px 0}
+
+footer{border-top:1px solid var(--line);background:#fff}
+footer .wrap{padding-block:22px;color:var(--gray);font-size:13px;display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:12px 32px}
+footer a{color:var(--forest)}
+@media (max-width:760px){footer .wrap{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<header class="band">
+  <div class="wrap">
+    <div class="brandrow">
+      <div>
+        <div class="eyebrow">Know Your Agent</div>
+        <h1 class="brand">KYAgent <span>Live Console</span></h1>
+        <p class="lede">Screen wallets and counterparties against the U.S. Treasury OFAC Specially Designated Nationals list, then run a full agent-payment investigation with a human in the loop.</p>
+      </div>
+      <dl class="liststatus" aria-label="Sanctions list snapshot">
+        <div><dt>OFAC SDN list</dt><dd class="live" id="st-date">—</dd></div>
+        <div><dt>Listed parties</dt><dd id="st-entries">—</dd></div>
+        <div><dt>Listed wallets</dt><dd id="st-wallets">—</dd></div>
+      </dl>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Console sections">
+      <button class="tab" role="tab" id="t-wallet" aria-controls="p-wallet" aria-selected="true"><span class="n">01</span>Wallet screening</button>
+      <button class="tab" role="tab" id="t-name" aria-controls="p-name" aria-selected="false"><span class="n">02</span>Counterparty screening</button>
+      <button class="tab" role="tab" id="t-pay" aria-controls="p-pay" aria-selected="false"><span class="n">03</span>Agent payment</button>
+      <button class="tab" role="tab" id="t-audit" aria-controls="p-audit" aria-selected="false"><span class="n">04</span>Audit trail <span class="mono" id="auditcount" style="margin-left:6px;color:#7F97A2"></span></button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- ======================================================= WALLET -->
+  <section class="panel" id="p-wallet" role="tabpanel" aria-labelledby="t-wallet">
+    <div class="grid">
+      <form class="card" id="walletForm" autocomplete="off">
+        <h2>Screen a wallet</h2>
+        <p class="sub">Paste one address per line, up to 50. Each is checked for an exact match against every digital currency address OFAC publishes on the SDN list.</p>
+        <label class="label" for="walletInput">Wallet addresses</label>
+        <textarea class="field" id="walletInput" spellcheck="false" placeholder="0x…  bc1…  T…"></textarea>
+        <div class="row" style="justify-content:space-between;margin-top:8px"><span class="detect" id="walletDetect"></span></div>
+        <div class="row" style="margin-top:14px">
+          <button class="btn" type="submit">Screen wallets</button>
+          <button class="btn ghost" type="button" id="walletClear">Clear</button>
+        </div>
+        <span class="label">Examples</span>
+        <div class="row" id="walletExamples"></div>
+        <div class="note"><b>How this maps to KYAgent.</b> In production this is the <span class="mono">sanctions</span> stage's exact-match step: <span class="mono">find({ "wallets.address": … })</span> on a B-tree index in MongoDB Atlas. It is an invariant, so a hit always blocks, regardless of any learned rule.</div>
+      </form>
+      <div class="results" id="walletResults" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <!-- ======================================================= NAME -->
+  <section class="panel" id="p-name" role="tabpanel" aria-labelledby="t-name" hidden>
+    <div class="grid">
+      <form class="card" id="nameForm" autocomplete="off">
+        <h2>Screen a counterparty name</h2>
+        <p class="sub">Fuzzy and phonetic matching across every SDN name and alias, so transliterations and look-alike spellings still surface.</p>
+        <label class="label" for="nameInput">Counterparty name</label>
+        <input class="field" id="nameInput" type="text" spellcheck="false" placeholder="e.g. Garantex Europe">
+        <label class="label" for="nameType">Party type</label>
+        <select class="field" id="nameType">
+          <option value="">All types</option><option value="E">Entities</option><option value="I">Individuals</option><option value="V">Vessels</option><option value="A">Aircraft</option>
+        </select>
+        <label class="label" for="nameThreshold">Review threshold</label>
+        <div class="slider"><input type="range" id="nameThreshold" min="70" max="99" value="88"><span class="mono" id="nameThresholdVal">0.88</span></div>
+        <div class="row" style="margin-top:16px">
+          <button class="btn" type="submit">Screen name</button>
+        </div>
+        <span class="label">Examples</span>
+        <div class="row" id="nameExamples"></div>
+        <div class="note"><b>Why names never auto-block.</b> Names are not unique, so a name match is evidence for an analyst: the case goes to <span class="mono">REVIEW</span> with scored matches attached. In KYAgent this runs as <span class="mono">$search</span> with standard and phonetic analyzers on the <span class="mono">sanctions_search</span> Atlas Search index.</div>
+      </form>
+      <div class="results" id="nameResults" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <!-- ======================================================= PAYMENT -->
+  <section class="panel" id="p-pay" role="tabpanel" aria-labelledby="t-pay" hidden>
+    <div class="grid">
+      <form class="card" id="payForm" autocomplete="off">
+        <h2>Investigate an agent payment</h2>
+        <p class="sub">TreasuryBot pays supplier invoices in USDC for Northwind under a delegation of 10,000 USDC per transaction and 25,000 USDC per rolling 24 hours.</p>
+        <div class="form2">
+          <div>
+            <label class="label" for="paySig">Request signature</label>
+            <select class="field" id="paySig">
+              <option value="valid">Registered key</option>
+              <option value="rotated">New, unrecognised key</option>
+              <option value="forged">Forged signature</option>
+            </select>
+          </div>
+          <div>
+            <label class="label" for="payAmount">Amount (USDC)</label>
+            <input class="field" id="payAmount" type="number" min="1" step="1" value="1500">
+          </div>
+          <div class="full">
+            <label class="label" for="payWallet">Counterparty wallet</label>
+            <input class="field" id="payWallet" type="text" spellcheck="false">
+          </div>
+          <div class="full">
+            <label class="label" for="payName">Counterparty name</label>
+            <input class="field" id="payName" type="text" spellcheck="false">
+          </div>
+        </div>
+        <div class="row" style="margin-top:16px">
+          <button class="btn" type="submit" id="payRun">Run investigation</button>
+        </div>
+        <span class="label">Scenarios</span>
+        <div class="row" id="payScenarios"></div>
+        <p class="hint">Sanctions checks use the live OFAC snapshot. Agent identity, delegation, transaction history and case memory are a simulated tenant for demonstration.</p>
+      </form>
+      <div id="payOut" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <!-- ======================================================= AUDIT -->
+  <section class="panel" id="p-audit" role="tabpanel" aria-labelledby="t-audit" hidden>
+    <div class="card" style="margin-bottom:18px">
+      <h2>Tamper-evident audit trail</h2>
+      <p class="sub">Every screening, decision and policy change in this session is appended here. Each record stores the SHA-256 hash of the record before it, so altering any past entry breaks every hash after it.</p>
+      <div class="integrity">
+        <button class="btn" type="button" id="auditVerify">Verify chain integrity</button>
+        <button class="btn ghost" type="button" id="auditTamper">Tamper with an entry</button>
+        <span id="auditStatus"></span>
+      </div>
+    </div>
+    <div class="tablewrap"><table>
+      <thead><tr><th>#</th><th>Time</th><th>Event</th><th>Detail</th><th>Hash</th></tr></thead>
+      <tbody id="auditBody"></tbody>
+    </table></div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div><strong style="color:var(--ink)">Demonstration only.</strong> Results are not legal advice or a compliance determination. Wallet screening is exact-match against addresses published on the OFAC SDN list; it does not assess indirect exposure such as funds received from listed wallets. Everything runs in your browser: addresses and names you enter are not sent anywhere.</div>
+    <div>Source: U.S. Department of the Treasury, Office of Foreign Assets Control, SDN list (<span id="ft-date"></span>).<br><a href="https://github.com/pauloes-btechs/KYAgent" target="_blank" rel="noopener">KYAgent on GitHub</a> · <a href="https://ofac.treasury.gov/specially-designated-nationals-and-blocked-persons-list-sdn-human-readable-lists" target="_blank" rel="noopener">OFAC SDN list</a></div>
+  </div>
+</footer>
+
+<script id="sdn" type="application/json">/*__SDN_DATA__*/null</script>
+<script>
+(() => {
+"use strict";
+const DATA = JSON.parse(document.getElementById("sdn").textContent);
+const $ = (s, r = document) => r.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const fmt = (n) => Number(n).toLocaleString("en-US");
+const TYPE = { E: "Entity", I: "Individual", V: "Vessel", A: "Aircraft" };
+const ASSET = { XBT: "Bitcoin", ETH: "Ethereum", USDT: "Tether (USDT)", USDC: "USD Coin", TRX: "Tron", LTC: "Litecoin", XMR: "Monero", BSC: "BNB Smart Chain", ARB: "Arbitrum", ETC: "Ethereum Classic", BCH: "Bitcoin Cash", DASH: "Dash", ZEC: "Zcash", BTG: "Bitcoin Gold", XRP: "XRP", XVG: "Verge", SOL: "Solana", BSV: "Bitcoin SV", DOGE: "Dogecoin", BNB: "BNB" };
+
+// ---------------------------------------------------------------- header
+$("#st-date").textContent = DATA.publishDate || "snapshot";
+$("#st-entries").textContent = fmt(DATA.entryCount);
+$("#st-wallets").textContent = fmt(DATA.walletCount);
+$("#ft-date").textContent = DATA.publishDate ? "published " + DATA.publishDate : "snapshot";
+
+// ---------------------------------------------------------------- tabs
+const tabs = [...document.querySelectorAll(".tab")];
+function show(id) {
+  tabs.forEach((t) => { const on = t.id === id; t.setAttribute("aria-selected", on); document.getElementById(t.getAttribute("aria-controls")).hidden = !on; });
+}
+tabs.forEach((t) => t.addEventListener("click", () => show(t.id)));
+const hashMap = { wallet: "t-wallet", names: "t-name", payment: "t-pay", audit: "t-audit" };
+if (hashMap[location.hash.slice(1)]) show(hashMap[location.hash.slice(1)]);
+
+// ---------------------------------------------------------------- audit chain
+const audit = [];
+const enc = new TextEncoder();
+async function sha256(s) { const b = await crypto.subtle.digest("SHA-256", enc.encode(s)); return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join(""); }
+const sortDeep = (v) => Array.isArray(v) ? v.map(sortDeep) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortDeep(v[k])])) : v;
+const canon = (o) => JSON.stringify(sortDeep(o));
+let chain = Promise.resolve();
+function record(type, detail, data = {}) {
+  chain = chain.then(async () => {
+    const prev = audit.length ? audit[audit.length - 1].hash : "0".repeat(64);
+    const body = { seq: audit.length + 1, at: new Date().toISOString(), type, detail, data: JSON.stringify(data), prev };
+    body.hash = await sha256(canon(body));
+    audit.push(body); renderAudit();
+    return body;
+  });
+  return chain;
+}
+function renderAudit() {
+  $("#auditcount").textContent = audit.length ? audit.length : "";
+  $("#auditBody").innerHTML = audit.length ? audit.map((e) => `<tr data-seq="${e.seq}"><td class="h">${e.seq}</td><td class="h">${esc(e.at.slice(11, 19))}</td><td class="mono" style="white-space:nowrap">${esc(e.type)}</td><td>${esc(e.detail)}</td><td class="h" title="${e.hash}">${e.prev.slice(0, 8)} → <b style="color:var(--ink)">${e.hash.slice(0, 12)}</b></td></tr>`).join("")
+    : `<tr><td colspan="5" style="color:var(--gray);padding:22px 14px">No events yet. Screen a wallet or run an investigation and it will appear here.</td></tr>`;
+}
+renderAudit();
+$("#auditVerify").addEventListener("click", async () => {
+  await chain;
+  let prev = "0".repeat(64), bad = null;
+  for (const e of audit) {
+    const { hash, ...rest } = e;
+    const h = await sha256(canon({ ...rest }));
+    if (e.prev !== prev || h !== hash) { bad = e.seq; break; }
+    prev = hash;
+  }
+  document.querySelectorAll("#auditBody tr").forEach((tr) => tr.classList.toggle("broken", bad !== null && Number(tr.dataset.seq) >= bad));
+  $("#auditStatus").innerHTML = !audit.length ? `<span class="pill neutral">No entries to verify</span>`
+    : bad === null ? `<span class="pill clear">Intact · ${audit.length} entries verified</span>`
+    : `<span class="pill block">Broken at entry #${bad}</span> <span style="color:var(--gray);font-size:13px">every entry from #${bad} onward no longer matches its recorded hash</span>`;
+});
+$("#auditTamper").addEventListener("click", async () => {
+  await chain;
+  if (!audit.length) { $("#auditStatus").innerHTML = `<span class="pill neutral">Add an event first</span>`; return; }
+  const e = audit[Math.max(0, Math.floor(audit.length / 2) - (audit.length > 1 ? 0 : 0))];
+  e.detail = e.detail.replace(/BLOCK|REVIEW/, "ALLOW") + (e.detail.includes("[edited]") ? "" : " [edited]");
+  renderAudit();
+  $("#auditStatus").innerHTML = `<span class="pill review">Entry #${e.seq} edited</span> <span style="color:var(--gray);font-size:13px">now verify the chain</span>`;
+});
+
+// ---------------------------------------------------------------- wallets
+const HEX = /^0x[0-9a-fA-F]{40}$/;
+function normAddr(a) { a = a.trim(); return HEX.test(a) || /^(bc1|ltc1|tb1)/i.test(a) ? a.toLowerCase() : a; }
+function detectChain(a) {
+  a = a.trim();
+  if (HEX.test(a)) return "EVM (Ethereum, USDT/USDC on EVM, BNB, Arbitrum)";
+  if (/^bc1[0-9a-z]{20,90}$/i.test(a) || /^[13][1-9A-HJ-NP-Za-km-z]{25,34}$/.test(a)) return "Bitcoin";
+  if (/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a)) return "Tron";
+  if (/^(ltc1[0-9a-z]{20,90}|[LM][1-9A-HJ-NP-Za-km-z]{26,33})$/i.test(a)) return "Litecoin";
+  if (/^[48][0-9AB][1-9A-HJ-NP-Za-km-z]{93}$/.test(a)) return "Monero";
+  if (/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(a)) return "XRP";
+  if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a)) return "Solana or other base58";
+  return "Unrecognised format";
+}
+const walletKeys = Object.keys(DATA.wallets);
+function pickExample(pred) { for (const k of walletKeys) { const [i, asset] = DATA.wallets[k]; if (pred(k, DATA.entries[i], asset)) return k; } return null; }
+const exListedEth = pickExample((k, e, a) => HEX.test(k) && /LAZARUS|GARANTEX|BLENDER|SINBAD|HYDRA|GRINEX/i.test(e[1])) || pickExample((k, e, a) => HEX.test(k) && e[2] === "E") || pickExample((k, e, a) => HEX.test(k));
+const exListedBtc = pickExample((k, e, a) => a === "XBT" && /GARANTEX|HYDRA|LAZARUS/i.test(e[1])) || pickExample((k, e, a) => a === "XBT");
+const exListedTrx = pickExample((k, e, a) => a === "TRX" && e[2] === "E") || pickExample((k, e, a) => a === "TRX");
+const exClean = "0x000000000000000000000000000000000000dEaD";
+const walletEx = [
+  exListedEth && ["Listed ETH address", exListedEth],
+  exListedBtc && ["Listed BTC address", exListedBtc],
+  exListedTrx && ["Listed TRX address", exListedTrx],
+  ["Clean address", exClean],
+].filter(Boolean);
+$("#walletExamples").innerHTML = walletEx.map(([l], i) => `<button type="button" class="chipbtn" data-i="${i}">${esc(l)}</button>`).join("") +
+  `<button type="button" class="chipbtn" data-i="all">Batch of ${walletEx.length}</button>`;
+$("#walletExamples").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button"); if (!b) return;
+  $("#walletInput").value = b.dataset.i === "all" ? walletEx.map((x) => x[1]).join("\n") : walletEx[+b.dataset.i][1];
+  updateDetect(); screenWallets();
+});
+function updateDetect() {
+  const lines = $("#walletInput").value.split(/\s*[\n,;]\s*/).map((s) => s.trim()).filter(Boolean);
+  $("#walletDetect").textContent = lines.length === 1 ? "Detected: " + detectChain(lines[0]) : lines.length > 1 ? `${lines.length} addresses` : "";
+}
+$("#walletInput").addEventListener("input", updateDetect);
+$("#walletClear").addEventListener("click", () => { $("#walletInput").value = ""; updateDetect(); renderWalletEmpty(); });
+function renderWalletEmpty() {
+  $("#walletResults").innerHTML = `<div class="empty"><strong style="color:var(--ink)">Paste a wallet to screen it.</strong><br>Try one of the examples: a real address from the OFAC list returns <span class="pill block" style="margin:0 2px">BLOCK</span>, and an unlisted address returns <span class="pill clear" style="margin:0 2px">CLEAR</span>. Results appear here with the SDN record behind any match.</div>`;
+}
+function lookupWallet(a) { const hit = DATA.wallets[normAddr(a)]; return hit ? { entry: DATA.entries[hit[0]], asset: hit[1] } : null; }
+function walletCard(a) {
+  const hit = lookupWallet(a); const chainLbl = detectChain(a);
+  if (hit) {
+    const [uid, name, t, progs, akas] = hit.entry;
+    return { hit, html: `<article class="res is-block"><div class="res-h"><div class="res-addr">${esc(a)}</div><span class="pill block">BLOCK · SANCTIONS_EXACT_MATCH</span></div>
+      <dl class="res-b"><dt>Listed party</dt><dd><strong>${esc(name)}</strong> <span class="tag">${TYPE[t] || "Entity"}</span></dd>
+      <dt>Programs</dt><dd>${progs ? progs.split(" ").map((p) => `<span class="tag">${esc(p)}</span>`).join(" ") : "—"}</dd>
+      <dt>Listed as</dt><dd>Digital currency address · ${esc(ASSET[hit.asset] || hit.asset)} (${esc(hit.asset)})</dd>
+      <dt>SDN entry</dt><dd class="mono">uid ${uid}${akas.length ? ` · ${akas.length} alias${akas.length > 1 ? "es" : ""}` : ""}</dd>
+      <dt>Outcome</dt><dd>Invariant <span class="mono">INV_SANCTIONS_EXACT_BLOCK</span>. The payment is blocked and the agent's passport moves to <span class="mono">SUSPENDED</span>.</dd></dl></article>` };
+  }
+  return { hit: null, html: `<article class="res"><div class="res-h"><div class="res-addr">${esc(a)}</div><span class="pill clear">CLEAR · NO EXACT MATCH</span></div>
+    <dl class="res-b"><dt>Format</dt><dd>${esc(chainLbl)}</dd><dt>Checked against</dt><dd>${fmt(DATA.walletCount)} addresses on the SDN list ${DATA.publishDate ? "published " + esc(DATA.publishDate) : ""}</dd>
+    <dt>Next in pipeline</dt><dd>Counterparty name screening, behavioural signals and verified case memory still apply before a payment is allowed.</dd></dl></article>` };
+}
+function screenWallets() {
+  const lines = [...new Set($("#walletInput").value.split(/\s*[\n,;]\s*/).map((s) => s.trim()).filter(Boolean))].slice(0, 50);
+  if (!lines.length) { renderWalletEmpty(); return; }
+  const cards = lines.map(walletCard);
+  const hits = cards.filter((c) => c.hit).length;
+  const summary = lines.length > 1 ? `<div class="card" style="padding:14px 18px;display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center"><strong>${lines.length} addresses screened</strong><span class="pill ${hits ? "block" : "clear"}">${hits} blocked</span><span class="pill clear">${lines.length - hits} clear</span></div>` : "";
+  $("#walletResults").innerHTML = summary + cards.map((c) => c.html).join("");
+  lines.forEach((a, i) => record("wallet.screened", `${a.slice(0, 10)}…${a.slice(-6)} → ${cards[i].hit ? "BLOCK SANCTIONS_EXACT_MATCH (" + cards[i].hit.entry[1] + ")" : "CLEAR"}`, { address: a, uid: cards[i].hit?.entry[0] ?? null }));
+}
+$("#walletForm").addEventListener("submit", (e) => { e.preventDefault(); screenWallets(); });
+
+// ---------------------------------------------------------------- names
+const STOP = new Set(["llc","ltd","limited","inc","co","corp","company","the","sa","ou","oao","ooo","zao","jsc","pjsc","ao","gmbh","ag","plc","fze","fzco","lp","llp","srl","bv","nv","of","and","de","la","el","al"]);
+function normName(s) { return s.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
+const GENERIC = new Set(["holding","holdings","group","trading","trade","international","global","industries","industry","services","service","enterprises","enterprise","investment","investments","capital","partners","resources","solutions","technologies","technology","supplies","supply","general","commercial","development","management","company","corporation","bank","exchange","shipping","logistics","components","holding","systems","products","materials","partners","associates","consulting","marine","energy","finance","financial"]);
+function toks(s) { return normName(s).split(" ").filter((t) => t && !STOP.has(t)); }
+function soundex(w) {
+  const m = { b:1,f:1,p:1,v:1,c:2,g:2,j:2,k:2,q:2,s:2,x:2,z:2,d:3,t:3,l:4,m:5,n:5,r:6 };
+  if (!w) return ""; w = w.replace(/[^a-z]/g, ""); if (!w) return "";
+  let out = w[0], last = m[w[0]] || 0;
+  for (let i = 1; i < w.length && out.length < 4; i++) { const c = m[w[i]] || 0; if (c && c !== last) out += c; if (w[i] !== "h" && w[i] !== "w") last = c; }
+  return (out + "000").slice(0, 4);
+}
+function jw(a, b) {
+  if (a === b) return 1; const la = a.length, lb = b.length; if (!la || !lb) return 0;
+  const md = Math.max(0, Math.floor(Math.max(la, lb) / 2) - 1); const ma = new Array(la).fill(false), mb = new Array(lb).fill(false); let m = 0;
+  for (let i = 0; i < la; i++) { const lo = Math.max(0, i - md), hi = Math.min(i + md + 1, lb); for (let j = lo; j < hi; j++) if (!mb[j] && a[i] === b[j]) { ma[i] = mb[j] = true; m++; break; } }
+  if (!m) return 0; let t = 0, k = 0;
+  for (let i = 0; i < la; i++) if (ma[i]) { while (!mb[k]) k++; if (a[i] !== b[k]) t++; k++; }
+  const j = (m / la + m / lb + (m - t / 2) / m) / 3; let p = 0; while (p < 4 && a[p] === b[p]) p++;
+  return j + p * 0.1 * (1 - j);
+}
+// index: one row per name/alias
+const NAMES = [];
+DATA.entries.forEach((e, idx) => { [e[1], ...e[4]].forEach((n, k) => { const t = toks(n); if (t.length) NAMES.push({ idx, n, alias: k > 0, t, j: t.join(" "), sx: t.map(soundex) }); }); });
+function scoreName(q, row) {
+  let tok = 0, wsum = 0;
+  for (const qt of q.t) { let best = 0; for (const ct of row.t) { const s = jw(qt, ct); if (s > best) best = s; } const w = qt.length * (GENERIC.has(qt) ? 0.25 : 1); tok += best * w; wsum += w; }
+  tok /= wsum;
+  if (q.t.every((t) => GENERIC.has(t))) tok *= 0.85;   // a name made only of generic words is weak evidence
+  // penalise candidates with many extra tokens (coverage)
+  const cover = Math.min(1, q.t.length / row.t.length);
+  const qdT = q.t.filter((t) => !GENERIC.has(t)), rdT = row.t.filter((t) => !GENERIC.has(t));
+  const fullD = jw((qdT.length ? qdT : q.t).join(" "), (rdT.length ? rdT : row.t).join(" "));
+  let s = tok * (0.88 + 0.12 * cover);
+  s = Math.max(s, Math.min(fullD * (0.9 + 0.1 * cover), s + 0.05));   // whole-string similarity may nudge, never carry, the score
+  let phon = false;
+  // Phonetic: every distinctive query token must sound like a candidate token AND be reasonably close in spelling.
+  const qd = q.t.filter((t) => !GENERIC.has(t));
+  if (qd.length && s < 0.93 && qd.join("").length >= 5 && qd.every((t) => { const c = soundex(t); return row.t.some((ct, i) => row.sx[i] === c && jw(t, ct) >= 0.87); }) && row.t.filter((ct) => !GENERIC.has(ct)).every((ct) => qd.some((t) => soundex(t) === soundex(ct) && jw(t, ct) >= 0.87))) { s = Math.max(s, 0.9 * (0.9 + 0.1 * cover)); phon = true; }
+  return { s, phon };
+}
+function screenName(query, type, thr) {
+  const q = { t: toks(query) }; q.j = q.t.join(" "); q.sx = q.t.map(soundex);
+  if (!q.t.length) return null;
+  const best = new Map();
+  for (const row of NAMES) {
+    const e = DATA.entries[row.idx]; if (type && e[2] !== type) continue;
+    if (Math.abs(row.j.length - q.j.length) > Math.max(12, q.j.length * 1.6)) continue;
+    const r = scoreName(q, row);
+    const cur = best.get(row.idx);
+    if (!cur || r.s > cur.s) best.set(row.idx, { ...r, row });
+  }
+  return [...best.values()].sort((a, b) => b.s - a.s).slice(0, 8);
+}
+const nameEx = ["Garrantex", "Lazarous Group", "Hidra Market", "Garantex Europe OU", "Northwind Supplies"];
+$("#nameExamples").innerHTML = nameEx.map((n) => `<button type="button" class="chipbtn">${esc(n)}</button>`).join("");
+$("#nameExamples").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; $("#nameInput").value = b.textContent; runName(); });
+$("#nameThreshold").addEventListener("input", (e) => { $("#nameThresholdVal").textContent = (e.target.value / 100).toFixed(2); });
+function runName() {
+  const q = $("#nameInput").value.trim(); if (!q) { renderNameEmpty(); return; }
+  const thr = $("#nameThreshold").value / 100; const t0 = performance.now();
+  const res = screenName(q, $("#nameType").value, thr) || []; const ms = Math.round(performance.now() - t0);
+  const top = res[0]; const review = top && top.s >= thr;
+  const head = `<article class="res ${review ? "is-review" : ""}"><div class="res-h"><div><div style="font-weight:600">${esc(q)}</div><div class="detect" style="margin-top:4px">${fmt(NAMES.length)} names and aliases scored in ${ms} ms · threshold ${thr.toFixed(2)}</div></div>
+    <span class="pill ${review ? "review" : "clear"}">${review ? "REVIEW · SANCTIONS_FUZZY_MATCH" : "CLEAR · BELOW THRESHOLD"}</span></div>
+    <div>${res.map((r) => { const e = DATA.entries[r.row.idx]; const pct = Math.round(r.s * 100); return `<div class="matchrow"><div class="nm">${esc(e[1])}${r.row.alias ? ` <span style="font-weight:400;color:var(--gray)">matched alias “${esc(r.row.n)}”</span>` : ""}</div>
+      <div class="meta"><span class="tag">${TYPE[e[2]] || "Entity"}</span> ${e[3] ? e[3].split(" ").slice(0, 4).map((p) => `<span class="tag">${esc(p)}</span>`).join(" ") : ""} <span class="mono">uid ${e[0]}</span>${r.phon ? ` <span class="tag" style="color:var(--forest);border-color:var(--mint-line);background:var(--mint)">phonetic</span>` : ""}</div>
+      <div class="score"><span class="scoreval">${r.s.toFixed(3)}</span><div class="bar ${r.s >= thr ? "hot" : ""}"><i style="width:${pct}%"></i></div></div></div>`; }).join("") || `<div class="matchrow"><div class="meta">No candidates.</div></div>`}</div></article>`;
+  $("#nameResults").innerHTML = head;
+  record("name.screened", `“${q}” → ${review ? `REVIEW (${DATA.entries[top.row.idx][1]}, ${top.s.toFixed(2)})` : "CLEAR"}`, { query: q, top: top ? DATA.entries[top.row.idx][0] : null, score: top ? +top.s.toFixed(3) : null });
+}
+function renderNameEmpty() { $("#nameResults").innerHTML = `<div class="empty"><strong style="color:var(--ink)">Enter a counterparty name.</strong><br>Misspell it on purpose: “Garrantex” or “Hidra Market” still surface the listed parties, with a score for each candidate and the alias that matched.</div>`; }
+$("#nameForm").addEventListener("submit", (e) => { e.preventDefault(); runName(); });
+
+// ---------------------------------------------------------------- payment pipeline (simulated tenant + live sanctions)
+const TENANT = {
+  agent: "agt_TREASURYBOT", operator: "op_NORTHWIND", delegation: "grt_TB_USDC", passport: "pp_TREASURYBOT",
+  maxTx: 10000, daily: 25000, spent24h: 4500, p50: 1200, p95: 2400,
+  known: new Map([["0x5aeda56215b167893e80b4fe645ba6d5bab767de", "Acme Components Ltd"], ["0x71c7656ec7ab88b098defb751b7401b5f6d8976f", "Brightline Logistics"]]),
+};
+const INVARIANTS_HASH = "c4f1e8…9a2d";
+let harness = { version: 1, steps: ["identity", "delegation", "sanctions", "signals", "memory", "policy"], k: 3 };
+let lastCase = null;
+const MEMORIES = [
+  { id: "mem_INV-1042", status: "VERIFIED", pattern: ["SIGNING_KEY_CHANGED", "NEW_COUNTERPARTY"], title: "Confirmed account takeover: key rotated, first payment to new wallet", outcome: "CONFIRMED_ACCOUNT_TAKEOVER" },
+  { id: "mem_INV-0977", status: "VERIFIED", pattern: ["AMOUNT_ANOMALY"], title: "Quarter-end supplier prepayment, cleared by analyst", outcome: "CLEARED" },
+  { id: "mem_INV-1101", status: "UNVERIFIED", pattern: ["SIGNING_KEY_CHANGED", "NEW_COUNTERPARTY"], title: "Unreviewed alert", outcome: null },
+];
+const SCEN = [
+  ["Routine invoice", { sig: "valid", amount: 1500, wallet: "0x5aeDA56215b167893e80B4fE645BA6d5Bab767DE", name: "Acme Components Ltd" }],
+  ["Over the limit", { sig: "valid", amount: 30000, wallet: "0x5aeDA56215b167893e80B4fE645BA6d5Bab767DE", name: "Acme Components Ltd" }],
+  ["Listed wallet", { sig: "valid", amount: 1500, wallet: exListedEth || "", name: "Harbor Trading" }],
+  ["Look-alike name", { sig: "valid", amount: 2200, wallet: "0x9b1f7a4c2e8d3b6a5f0c1e2d3a4b5c6d7e8f9a0b", name: "Garrantex Europe" }],
+  ["Takeover pattern", { sig: "rotated", amount: 2900, wallet: "0x3c8e1b9f4a7d2e6c5b0a9f8e7d6c5b4a3f2e1d0c", name: "Pinecrest Holdings" }],
+  ["Forged request", { sig: "forged", amount: 1500, wallet: "0x5aeDA56215b167893e80B4fE645BA6d5Bab767DE", name: "Acme Components Ltd" }],
+];
+function applyScen(s) { $("#paySig").value = s.sig; $("#payAmount").value = s.amount; $("#payWallet").value = s.wallet; $("#payName").value = s.name; }
+$("#payScenarios").innerHTML = SCEN.map(([l], i) => `<button type="button" class="chipbtn" data-i="${i}">${esc(l)}</button>`).join("");
+$("#payScenarios").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; applyScen(SCEN[+b.dataset.i][1]); runPayment(); });
+applyScen(SCEN[0][1]);
+
+const ENG = { identity: "code · Ed25519", delegation: "find + aggregate", sanctions: "find → $search", signals: "aggregate · $percentile", memory: "$vectorSearch", policy: "invariants + policy", signing_key_history_check: "find · agents", decision: "precedence" };
+function evaluate(inp) {
+  const st = []; const reasons = []; const add = (lvl, code) => reasons.push({ lvl, code });
+  const wl = normAddr(inp.wallet || ""); const signals = [];
+  // 1 identity
+  if (inp.sig === "forged") {
+    st.push({ n: "identity", s: "fail", ev: `Signature does not verify against the registered key for <code>${TENANT.agent}</code>. Pipeline short-circuits.` });
+    add("BLOCK", "IDENTITY_DENIED");
+    for (const n of [...harness.steps.slice(1), ...(harness.version > 1 ? ["signing_key_history_check"] : [])]) st.push({ n, s: "skip", ev: "Skipped after identity failure." });
+    return { st, reasons, signals };
+  }
+  st.push({ n: "identity", s: "pass", ev: inp.sig === "rotated" ? `Signature valid for a key registered 2 hours ago. Operator <code>${TENANT.operator}</code> active.` : `Signature valid for registered key. Operator <code>${TENANT.operator}</code> active, nonce unused.` });
+  // 2 delegation
+  const amt = Math.max(0, Math.round(+inp.amount || 0));
+  const overMax = amt > TENANT.maxTx, overDaily = TENANT.spent24h + amt > TENANT.daily;
+  if (overMax) add("BLOCK", "DELEGATION_MAX_EXCEEDED"); if (overDaily) add("BLOCK", "DAILY_LIMIT_EXCEEDED");
+  st.push({ n: "delegation", s: overMax || overDaily ? "fail" : "pass", ev: `${fmt(amt)} USDC against max ${fmt(TENANT.maxTx)}; 24 h spend ${fmt(TENANT.spent24h)} + ${fmt(amt)} of ${fmt(TENANT.daily)}.${overMax ? " <code>INV_DELEGATION_MAX</code> breached." : ""}${overDaily ? " <code>INV_DAILY_LIMIT</code> breached." : ""}` });
+  // 3 sanctions (live data)
+  const hit = inp.wallet ? lookupWallet(inp.wallet) : null;
+  const nm = inp.name ? (screenName(inp.name, "", 0.88) || [])[0] : null;
+  const fuzzy = nm && nm.s >= 0.88;
+  if (hit) add("BLOCK", "SANCTIONS_EXACT_MATCH"); if (fuzzy) add("REVIEW", "SANCTIONS_FUZZY_MATCH");
+  st.push({ n: "sanctions", s: hit ? "fail" : fuzzy ? "flag" : "pass", ev: hit ? `Exact match: wallet listed for <b>${esc(hit.entry[1])}</b> (SDN uid ${hit.entry[0]}). <code>INV_SANCTIONS_EXACT_BLOCK</code>.`
+    : fuzzy ? `No wallet match. Name “${esc(inp.name)}” scores ${nm.s.toFixed(2)} against <b>${esc(DATA.entries[nm.row.idx][1])}</b>.`
+    : `No wallet match among ${fmt(DATA.walletCount)} listed addresses; best name score ${nm ? nm.s.toFixed(2) : "—"}.` });
+  // 4 signals
+  const known = TENANT.known.has(wl);
+  if (!known) signals.push("NEW_COUNTERPARTY"); if (inp.sig === "rotated") signals.push("SIGNING_KEY_CHANGED");
+  if (amt > TENANT.p95) signals.push("AMOUNT_ANOMALY"); if (amt >= TENANT.maxTx * 0.9 && amt <= TENANT.maxTx) signals.push("NEAR_CEILING");
+  st.push({ n: "signals", s: signals.length ? "flag" : "pass", ev: signals.length ? signals.map((x) => `<code>${x}</code>`).join(" ") + ` · p50 ${fmt(TENANT.p50)}, p95 ${fmt(TENANT.p95)} USDC over 30 settled payments.` : `Known counterparty, amount within p95 (${fmt(TENANT.p95)} USDC), registered key.` });
+  // 5 memory
+  const cands = MEMORIES.map((m) => ({ m, score: m.pattern.every((p) => signals.includes(p)) ? 0.91 : m.pattern.some((p) => signals.includes(p)) ? 0.62 : 0.31 })).sort((a, b) => b.score - a.score).slice(0, harness.k);
+  const dropped = cands.filter((c) => c.m.status !== "VERIFIED").length; const kept = cands.filter((c) => c.m.status === "VERIFIED" && c.score >= 0.8);
+  if (kept.some((c) => c.m.outcome === "CONFIRMED_ACCOUNT_TAKEOVER")) add("REVIEW", "MEMORY_PRECEDENT_TAKEOVER");
+  st.push({ n: "memory", s: kept.length ? "flag" : "pass", ev: `k=${harness.k}, filter <code>status: VERIFIED</code>. ${kept.length ? `Precedent <code>${kept[0].m.id}</code> (score ${kept[0].score.toFixed(2)}): ${esc(kept[0].m.title)}.` : "No verified precedent above threshold."}${dropped ? ` ${dropped} unverified hit dropped.` : ""}` });
+  // adaptive step (v2)
+  if (harness.version > 1) {
+    const fire = inp.sig === "rotated";
+    if (fire) add("REVIEW", "KEY_HISTORY_ANOMALY");
+    st.push({ n: "signing_key_history_check", s: fire ? "flag" : "pass", adapt: true, ev: fire ? "Current key first seen 2 hours ago; previous key used for 30 of 30 settled payments." : "Signing key unchanged for 30 settled payments." });
+  }
+  // 6 policy
+  const esc1 = signals.includes("NEW_COUNTERPARTY") && signals.includes("AMOUNT_ANOMALY");
+  if (esc1) add("REVIEW", "ESCALATION_NEW_COUNTERPARTY_LARGE");
+  st.push({ n: "policy", s: reasons.some((r) => r.lvl === "BLOCK") ? "fail" : esc1 ? "flag" : "pass", ev: `Harness v${harness.version}, invariantsHash <code>${INVARIANTS_HASH}</code>. 6 invariants evaluated${reasons.some((r) => r.lvl === "BLOCK") ? ", breach recorded" : ", all held"}.${esc1 ? " Rule fired: new counterparty with amount above p95." : ""}` });
+  return { st, reasons, signals };
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let running = false;
+async function runPayment() {
+  if (running) return; running = true; $("#payRun").disabled = true;
+  const inp = { sig: $("#paySig").value, amount: $("#payAmount").value, wallet: $("#payWallet").value.trim(), name: $("#payName").value.trim() };
+  const { st, reasons } = evaluate(inp);
+  const decision = reasons.some((r) => r.lvl === "BLOCK") ? "BLOCK" : reasons.some((r) => r.lvl === "REVIEW") ? "REVIEW" : "ALLOW";
+  const id = "inv_" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase();
+  const order = ["identity", "delegation", "sanctions", "signals", "memory", "signing_key_history_check", "policy"];
+  const stages = order.map((n) => st.find((x) => x.n === n)).filter(Boolean);
+  $("#payOut").innerHTML = `<div class="dec"><div class="dec-h"><div class="dec-id">investigation <b>${id}</b> · ${esc(TENANT.agent)}</div><span class="hv">harness v${harness.version}</span></div>
+    <ol class="stages">${stages.map((s) => `<li class="stage st-${s.s}${s.adapt ? " st-adapt" : ""}"><span class="dot"></span><span class="nm">${s.n}</span><span class="eng">${ENG[s.n]}</span><div class="ev">${s.ev}</div></li>`).join("")}
+    <li class="stage" id="decStage"><span class="dot"></span><span class="nm">decision</span><span class="eng">${ENG.decision}</span><div class="ev">Combining ${reasons.length} reason${reasons.length === 1 ? "" : "s"}…</div></li></ol>
+    <div class="dec-f" id="decFoot" hidden></div><div id="decMore"></div></div>
+    <p class="sim">Simulated tenant: agent, delegation, 30-payment history and case memory. Sanctions stage: live OFAC SDN snapshot.</p>`;
+  const lis = [...document.querySelectorAll("#payOut .stage")];
+  for (const li of lis) { li.classList.add("on"); if (!reduced) await sleep(230); }
+  const dl = $("#decStage"); dl.classList.add(decision === "ALLOW" ? "st-pass" : decision === "REVIEW" ? "st-flag" : "st-fail");
+  dl.querySelector(".ev").innerHTML = `Precedence <code>BLOCK › REVIEW › ALLOW</code> → <b style="color:#fff">${decision}</b>`;
+  const receipt = { receiptId: "rcp_" + id.slice(4), investigationId: id, agentId: TENANT.agent, delegationId: TENANT.delegation, riskDecision: decision, reasons: reasons.map((r) => r.code), harnessVersion: harness.version, invariantsHash: INVARIANTS_HASH, sanctionsDataset: "OFAC SDN " + (DATA.publishDate || ""), amount: { value: Math.round(+inp.amount || 0), asset: "USDC" }, counterparty: inp.wallet || null, issuedAt: new Date().toISOString() };
+  receipt.sha256 = await sha256(canon({ ...receipt }));
+  const foot = $("#decFoot"); foot.hidden = false;
+  foot.innerHTML = `<div class="reasons">${reasons.length ? reasons.map((r) => `<span class="r">${r.code}</span>`).join("") : `<span class="r">CLEAR</span>`}</div><span class="pill bigpill ${decision.toLowerCase()}">${decision}</span>`;
+  const canConfirm = decision === "REVIEW" && harness.version === 1 && inp.sig === "rotated";
+  $("#decMore").innerHTML = `<div class="actions">${canConfirm ? `<button class="btn" type="button" id="confirmAto">Analyst: confirm account takeover</button>` : ""}<button class="btn ghost" type="button" id="toggleReceipt">View signed receipt</button>${harness.version > 1 ? `<button class="btn ghost" type="button" id="resetHarness">Reset harness to v1</button>` : ""}</div><pre class="receipt" id="receiptBox" hidden>${esc(JSON.stringify(receipt, null, 2))}</pre>`;
+  $("#toggleReceipt").addEventListener("click", () => { const b = $("#receiptBox"); b.hidden = !b.hidden; });
+  $("#confirmAto")?.addEventListener("click", confirmAto);
+  $("#resetHarness")?.addEventListener("click", () => { harness = { version: 1, steps: harness.steps, k: 3 }; record("harness.reset", "Harness restored to v1 for the demo"); runPayment(); });
+  lastCase = { id, decision };
+  record("investigation.decided", `${id} → ${decision}${reasons.length ? " (" + reasons.map((r) => r.code).join(", ") + ")" : ""} under harness v${receipt.harnessVersion}`, receipt);
+  running = false; $("#payRun").disabled = false;
+}
+async function confirmAto() {
+  const from = harness.version;
+  harness = { version: from + 1, steps: [...harness.steps.slice(0, 5), "signing_key_history_check", harness.steps[5]], k: 5 };
+  await record("investigation.confirmed", `${lastCase.id} confirmed CONFIRMED_ACCOUNT_TAKEOVER by analyst (admin); memory promoted to VERIFIED`);
+  await record("harness.adapted", `v${from} → v${harness.version}: add step signing_key_history_check; memory k 3 → 5; invariantsHash unchanged`);
+  $("#decMore").insertAdjacentHTML("afterbegin", `<div class="adapt"><strong style="color:#fff">Harness adapted: v${from} → v${harness.version}.</strong> Diff <code>add /steps/5 signing_key_history_check</code>, <code>memoryRetrieval.k 3 → 5</code>. Invariants hash unchanged; v${from} kept as superseded. Run the takeover scenario again to see the extra stage.</div>`);
+  $("#confirmAto")?.remove();
+}
+$("#payForm").addEventListener("submit", (e) => { e.preventDefault(); runPayment(); });
+
+// ---------------------------------------------------------------- initial state: show real results immediately
+if (exListedEth) { $("#walletInput").value = [exListedEth, exClean].join("\n"); updateDetect(); screenWallets(); } else renderWalletEmpty();
+$("#nameInput").value = "Garrantex"; runName();
+runPayment();
+})();
+</script>
