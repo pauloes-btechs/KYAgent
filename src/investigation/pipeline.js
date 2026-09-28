@@ -1,20 +1,25 @@
-// Investigation pipeline — T07 skeleton (investigation-pipeline.md; T14 adds the sanctions and
-// policy stages). Stage order here: identity -> delegation -> signals -> memory ->
+// Investigation pipeline (investigation-pipeline.md; T14 adds the policy stage). Stage order
+// here: identity -> delegation -> sanctions -> signals -> memory ->
 // [adaptive steps of the active harness policy, T13] -> decision.
 //
 // - identity runs in `state` mode (agent active, operator verified); DENY short-circuits every
 //   later stage to `skipped` with BLOCK IDENTITY_DENIED.
 // - delegation failures add BLOCK reasons but do not short-circuit (evidence completeness).
+// - sanctions (src/sanctions/screen.js): exact wallet `find` ⇒ INV_SANCTIONS_EXACT_BLOCK ⇒ BLOCK
+//   SANCTIONS_EXACT_MATCH (deterministic, independent of `$search`); the `$search` fuzzy/alias/
+//   phonetic name screen adds evidence, and REVIEW SANCTIONS_FUZZY_MATCH only above the policy's
+//   `sanctionsFuzzy.minScorePpm`. An exact hit survives a fuzzy-screen error (both reasons kept).
 // - memory is Atlas `$vectorSearch` (src/memory/retrieve.js); only VERIFIED hits >= minScore are
 //   kept. A kept CONFIRMED_ACCOUNT_TAKEOVER precedent can only add REVIEW (precedent, never proof).
 // - fail closed: any stage throwing ⇒ that stage `error`, the rest `skipped`, BLOCK INTERNAL_ERROR.
 // Nothing is persisted here; the investigations service (T08) stores the returned document.
 import { ADAPTIVE_STEPS, holds, precedentMemories } from '../harness/invariants.js';
 import { retrieveMemories } from '../memory/retrieve.js';
+import { screenSanctions } from '../sanctions/screen.js';
 import { ADAPTIVE_STEP_RUNNERS } from './adaptiveSteps.js';
 import { computeSignals } from './signals.js';
 
-export const SKELETON_STAGES = Object.freeze(['identity', 'delegation', 'signals', 'memory', 'decision']);
+export const SKELETON_STAGES = Object.freeze(['identity', 'delegation', 'sanctions', 'signals', 'memory', 'decision']);
 
 export const DEFAULT_POLICY = Object.freeze({
   memoryRetrieval: Object.freeze({ k: 3, numCandidates: 100, minScorePpm: 780_000 }),
@@ -35,6 +40,8 @@ const MESSAGES = {
   DELEGATION_MAX_EXCEEDED: 'Amount exceeds the delegation maximum.',
   WALLET_NOT_APPROVED: 'Source wallet is not the delegation-approved wallet.',
   ASSET_NOT_PERMITTED: 'Asset is not permitted by the delegation.',
+  SANCTIONS_EXACT_MATCH: 'A screened wallet exactly matches a sanctioned wallet address.',
+  SANCTIONS_FUZZY_MATCH: 'A screened name resembles a sanctioned entity name or alias.',
   MEMORY_PRECEDENT_TAKEOVER: 'A VERIFIED account-takeover precedent matches this case.',
   HARNESS_INVARIANTS_MISMATCH: 'The active harness version was created under different invariants.',
   INTERNAL_ERROR: 'An investigation stage failed; failing closed.',
@@ -145,9 +152,10 @@ function decide(reasons) {
 
 /**
  * Run the skeleton investigation for one candidate payment.
- * `tx` = { amount (minor units), asset|currency, counterparty: { address, name? }, wallet?, signingKeyThumbprint, id? }.
+ * `tx` = { amount (minor units), asset|currency, counterparty: { address, name? }, counterparties?: [{ address, name? }],
+ *          wallet?, signingKeyThumbprint, id? }.
  * `delegationId` selects the grant (defaults to `tx.delegationId`).
- * Returns `{ agentId, trigger, stages[], signals, memory, riskDecision, decision, reasons, evidence[] }`.
+ * Returns `{ agentId, trigger, stages[], signals, memory, sanctions, riskDecision, decision, reasons, evidence[] }`.
  */
 export async function runInvestigation({
   store,
@@ -161,7 +169,7 @@ export async function runInvestigation({
   invariantsMatch = true,
 }) {
   const stages = [];
-  const ctx = { signals: [], memory: null, halted: false };
+  const ctx = { signals: [], memory: null, sanctions: null, halted: false };
 
   const run = async (name, engine, fn) => {
     const startedAt = new Date();
@@ -177,13 +185,15 @@ export async function runInvestigation({
       return out;
     } catch (err) {
       ctx.halted = true;
+      // A stage may attach what it had already established (e.g. an exact sanctions hit).
+      const partial = err?.stagePartial ?? null;
       stages.push({
         ...base,
         status: 'error',
         durationMs: Math.round(performance.now() - t0),
-        result: { error: err?.name ?? 'Error', code: err?.code ?? null },
-        evidence: [],
-        reasons: [reason('INTERNAL_ERROR', 'BLOCK', name)],
+        result: { ...(partial?.result ?? {}), error: err?.name ?? 'Error', code: err?.code ?? null },
+        evidence: partial?.evidence ?? [],
+        reasons: [...(partial?.reasons ?? []), reason('INTERNAL_ERROR', 'BLOCK', name)],
       });
       return null;
     }
@@ -203,6 +213,33 @@ export async function runInvestigation({
   await run('delegation', 'find', async () => {
     grant = delegationId ? await store.grants.findById(delegationId) : null;
     return delegationStage({ grant, agentId, tx: payment(), now });
+  });
+
+  await run('sanctions', store.db ? '$search' : 'find', async () => {
+    const p = payment();
+    const screened = [
+      { role: 'wallet', address: p.wallet, name: null },
+      { role: 'counterparty', address: p.counterparty?.address ?? null, name: p.counterparty?.name ?? null },
+      // sanctions_change: every distinct recent counterparty of the agent (investigation-pipeline.md §2).
+      ...(p.counterparties ?? []).map((c) => ({ role: 'counterparty', address: c?.address ?? null, name: c?.name ?? null })),
+    ];
+    const exactReasons = (hits) =>
+      hits.length
+        ? [reason('SANCTIONS_EXACT_MATCH', 'BLOCK', 'sanctions', { invariantId: 'INV_SANCTIONS_EXACT_BLOCK', evidenceRefs: [...new Set(hits.map((h) => h.sanctionsId))] })]
+        : [];
+    let r;
+    try {
+      r = await screenSanctions({ store, screened, fuzzy: policy.sanctionsFuzzy });
+    } catch (err) {
+      if (err?.stagePartial) err.stagePartial.reasons = exactReasons(err.stagePartial.result.exactHits);
+      throw err;
+    }
+    const reasons = exactReasons(r.result.exactHits);
+    if (r.fuzzyFlagged.length) {
+      reasons.push(reason('SANCTIONS_FUZZY_MATCH', 'REVIEW', 'sanctions', { evidenceRefs: [...new Set(r.fuzzyFlagged.map((h) => h.sanctionsId))] }));
+    }
+    ctx.sanctions = r.result;
+    return { status: r.exactHit ? 'failed' : reasons.length ? 'flagged' : 'passed', result: r.result, evidence: r.evidence, reasons };
   });
 
   await run('signals', store.db ? 'aggregate' : 'js', async () => {
@@ -258,6 +295,7 @@ export async function runInvestigation({
     stages,
     signals: ctx.signals,
     memory: ctx.memory,
+    sanctions: ctx.sanctions,
     riskDecision: verdict.riskDecision,
     decision: verdict.riskDecision === 'ALLOW' ? 'ALLOW' : 'DENY',
     reasons: verdict.reasons,
