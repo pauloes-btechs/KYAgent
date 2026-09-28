@@ -496,6 +496,36 @@ export const DEMO3_CASE = Object.freeze({
   expected: Object.freeze({ riskDecision: 'REVIEW', reasonCode: 'MEMORY_PRECEDENT_TAKEOVER', memoryId: 'mem_INV-1042' }),
 });
 
+// Demo 1/2 pay TreasuryBot's established counterparty A (fixtures/transactions/treasurybot.json)
+// with the original, registered key: no behavioural signal fires for Demo 1.
+const KNOWN_COUNTERPARTY = Object.freeze({ ...readJson('transactions/treasurybot.json').counterparties.A });
+
+/**
+ * Demo 1 (REQ-P1-1): clean payment well inside the delegation (1 500 USDC, below the 2 000 USDC
+ * median) to a known counterparty. Expected: ALLOW / CLEAR, passport ACTIVE.
+ */
+export const DEMO1_CASE = Object.freeze({
+  action: 'payments:create',
+  context: Object.freeze({
+    amount: 1_500 * USDC,
+    currency: 'USDC',
+    counterparty: KNOWN_COUNTERPARTY.address,
+    counterpartyName: KNOWN_COUNTERPARTY.name,
+  }),
+  expected: Object.freeze({ riskDecision: 'ALLOW', reasonCode: 'CLEAR' }),
+});
+
+/**
+ * Demo 2 (REQ-P1-2): the same verified agent and counterparty, 30 000 USDC over the 25 000 USDC
+ * delegation maximum. Expected: BLOCK / DELEGATION_MAX_EXCEEDED wrapping the /v1/verify
+ * CONSTRAINT_VIOLATION; the identity stage still passes (identity VERIFIED, action UNAUTHORIZED).
+ */
+export const DEMO2_CASE = Object.freeze({
+  action: 'payments:create',
+  context: Object.freeze({ ...DEMO1_CASE.context, amount: 30_000 * USDC }),
+  expected: Object.freeze({ riskDecision: 'BLOCK', reasonCode: 'DELEGATION_MAX_EXCEEDED', identityReasonCode: 'CONSTRAINT_VIOLATION' }),
+});
+
 /**
  * The takeover precondition of Demo 3: TreasuryBot's registered signing key is replaced by the
  * `rotated` key (2 h before `now`), recorded in `signingKeyHistory`. Idempotent; undone by reset.
