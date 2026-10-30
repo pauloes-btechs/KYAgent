@@ -27,6 +27,6 @@
     "seed": "node scripts/seed.js"
   },
   "dependencies": {
-    "mongodb": "^6.10.0"
+    "mongodb": "^7.7.0"
   }
 }
