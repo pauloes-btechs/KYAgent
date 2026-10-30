@@ -383,7 +383,7 @@ KYAgent was delivered by **Foundry**, an autonomous software-delivery system: a 
 | [`docs/contracts/`](docs/contracts/) | OpenAPI, data schema, search indexes, harness, passport, decision vocabulary |
 | [`docs/SECURITY_REVIEW_HARNESS.md`](docs/SECURITY_REVIEW_HARNESS.md) | Review of the invariant boundary |
 | [`DELIVERY_PLAN.md`](DELIVERY_PLAN.md) | Requirements, priorities and acceptance criteria |
-| [`docs/explainer/index.html`](docs/explainer/index.html) | Interactive, non-technical walkthrough |
+| [`docs/live/index.html`](docs/live/index.html) | Interactive, non-technical walkthrough (KYAgent Live Console) |
 
 **References:** [Atlas Search](https://www.mongodb.com/docs/atlas/atlas-search/) · [Atlas Vector Search](https://www.mongodb.com/docs/atlas/atlas-vector-search/) · [Change Streams](https://www.mongodb.com/docs/manual/changeStreams/) · [Voyage AI](https://docs.voyageai.com/)
 
