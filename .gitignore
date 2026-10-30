@@ -12,3 +12,7 @@ secrets/
 
 ._*
 .DS_Store
+
+# stray lockfile from bun installs — npm is the package manager
+bun.lock
+bun.lockb
