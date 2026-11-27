@@ -342,3 +342,16 @@ test('REQ-014 unit: every decision is audited and store failures fail closed', a
   assert.equal(res.body.decision, 'DENY');
   assert.equal(code(res.body), 'INTERNAL_ERROR');
 });
+
+test('REQ-014 unit [grant cap]: a permitting grant behind 100+ non-matching grants still ALLOWs', async () => {
+  // The store caps findActiveFor at 100; the action filter runs before the cap, so older grants cannot hide this one.
+  const s = await setup();
+  const base = await s.store.grants.findById(GRT);
+  for (let i = 0; i < 101; i++) {
+    await s.store.grants.insert({ ...base, id: `grt_${String(i).padStart(26, '0')}`, actions: ['orders:create'], createdAt: new Date(Date.UTC(2025, 0, 1, 0, i)) });
+  }
+  const r = await s.run(s.signed());
+  assert.equal(r.decision, 'ALLOW');
+  assert.equal(r.grantId, GRT);
+  assert.equal(code(await s.run(s.signed({ action: 'refunds:create', context: {} }))), 'ACTION_NOT_PERMITTED');
+});

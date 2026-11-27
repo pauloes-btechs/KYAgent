@@ -138,11 +138,13 @@ export class MemoryStore {
       insert: (d) => grants.insert(d),
       findById: (id) => grants.findById(id),
       list: (q) => grants.list(q),
-      /** Active, unexpired grants from businessId to agentId, createdAt ascending. */
-      findActiveFor: async (agentId, businessId, now) =>
+      /** Active, unexpired grants from businessId to agentId (holding one of `patterns`, if given), createdAt ascending, first 100 like MongoStore. */
+      findActiveFor: async (agentId, businessId, now, patterns) =>
         [...grants.docs.values()]
           .filter((g) => g.agentId === agentId && g.businessId === businessId && g.status === 'active' && g.expiresAt > now)
+          .filter((g) => !patterns || g.actions.some((p) => patterns.includes(p)))
           .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1))
+          .slice(0, 100)
           .map(clone),
       revoke: (id, patch) => grants.updateIf(id, ['active'], { ...patch, status: 'revoked' }),
     };

@@ -9,6 +9,12 @@ export function actionMatches(pattern, action) {
   return pattern === action;
 }
 
+/** Every grant pattern that `actionMatches` accepts for a valid `action`: itself plus each `prefix:*`. */
+export function patternsFor(action) {
+  const parts = action.split(':');
+  return [action, ...parts.slice(1).map((_, i) => `${parts.slice(0, i + 1).join(':')}:*`)];
+}
+
 export const anyActionMatches = (patterns, action) => Array.isArray(patterns) && patterns.some((p) => actionMatches(p, action));
 
 /** All present constraints must hold; a missing context value is a violation. */

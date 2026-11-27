@@ -8,7 +8,7 @@ import { parsePublicKey, sha256hex, verifySignature } from '../crypto/ed25519.js
 import { newId } from '../ids.js';
 import { schemas, validate } from '../validate.js';
 import { invariant } from '../harness/invariants.js';
-import { anyActionMatches, actionMatches } from './authz.js';
+import { anyActionMatches, patternsFor } from './authz.js';
 import { eventOut, pageOut } from './serialize.js';
 import { pageQuery } from './util.js';
 
@@ -123,10 +123,9 @@ export function verificationService({ store, clock, config, audit }) {
     }
 
     // 10. no credential: evaluate active grants from this business
-    const grants = await store.grants.findActiveFor(agent.id, businessId, now);
-    if (!grants.length) deny('NO_GRANT');
-    const matching = grants.filter((g) => g.actions.some((p) => actionMatches(p, req.action)));
-    if (!matching.length) deny('ACTION_NOT_PERMITTED');
+    // The action match runs in the store query so the store's result cap cannot hide a permitting grant.
+    const matching = await store.grants.findActiveFor(agent.id, businessId, now, patternsFor(req.action));
+    if (!matching.length) deny((await store.grants.findActiveFor(agent.id, businessId, now)).length ? 'ACTION_NOT_PERMITTED' : 'NO_GRANT');
     const winner = matching.find((g) => withinDelegationMax(g.constraints, req.resource, req.context));
     if (!winner) deny('CONSTRAINT_VIOLATION');
     out.grantId = winner.id;

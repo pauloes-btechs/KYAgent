@@ -165,9 +165,9 @@ export class MongoStore {
     const grants = repo(grantsCol);
     this.grants = {
       ...grants,
-      findActiveFor: async (agentId, businessId, now) =>
+      findActiveFor: async (agentId, businessId, now, patterns) =>
         (await grantsCol
-          .find({ agentId, businessId, status: 'active', expiresAt: { $gt: now } })
+          .find({ agentId, businessId, status: 'active', expiresAt: { $gt: now }, ...(patterns && { actions: { $in: patterns } }) })
           .sort({ createdAt: 1, _id: 1 })
           .limit(100)
           .toArray()).map(fromDoc),

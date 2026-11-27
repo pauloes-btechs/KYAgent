@@ -8,7 +8,7 @@ import { signCredential, verifyCredentialJws } from '../src/crypto/credentials.j
 import { b64uDecodeStrict, keyThumbprint, parsePublicKey, privateKeyFromSeed, publicKeyB64u, signMessage, verifySignature } from '../src/crypto/ed25519.js';
 import { ulid } from '../src/ids.js';
 import { agentKeyFromSeed, signRequest } from '../src/sdk/agentSigner.js';
-import { actionMatches, constraintsSatisfied } from '../src/services/authz.js';
+import { actionMatches, constraintsSatisfied, patternsFor } from '../src/services/authz.js';
 
 const vector = JSON.parse(readFileSync(new URL('./vectors/sig-v1.json', import.meta.url), 'utf8'));
 
@@ -110,6 +110,15 @@ test('action patterns and constraints', () => {
   assert.ok(constraintsSatisfied({ maxAmount: 10, currency: 'USD', resources: ['r'] }, 'r', { amount: 10, currency: 'USD' }));
   assert.ok(!constraintsSatisfied({ maxAmount: 10 }, '', { amount: '5' }));
   assert.ok(!constraintsSatisfied({ resources: ['r'] }, '', {}));
+});
+
+test('patternsFor lists exactly the grant patterns actionMatches accepts (the MongoStore $in filter)', () => {
+  assert.deepEqual(patternsFor('orders'), ['orders']);
+  assert.deepEqual(patternsFor('orders:refund:partial'), ['orders:refund:partial', 'orders:*', 'orders:refund:*']);
+  const candidates = ['*', 'orders', 'orders:*', 'orders:refund', 'orders:refund:*', 'orders:refund:partial', 'orders:refund:partial:*', 'ordersx:*', 'refund:*'];
+  for (const action of ['orders', 'orders:refund', 'orders:refund:partial', 'ordersx:create']) {
+    for (const p of candidates) assert.equal(patternsFor(action).includes(p), actionMatches(p, action), `${p} vs ${action}`);
+  }
 });
 
 test('ULIDs are 26 Crockford base32 chars and time-ordered', () => {
