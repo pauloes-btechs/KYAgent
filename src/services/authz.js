@@ -11,6 +11,7 @@ export function actionMatches(pattern, action) {
 
 /** Every grant pattern that `actionMatches` accepts for a valid `action`: itself plus each `prefix:*`. */
 export function patternsFor(action) {
+  if (typeof action !== 'string' || !ACTION_RE.test(action)) return [];
   const parts = action.split(':');
   return [action, ...parts.slice(1).map((_, i) => `${parts.slice(0, i + 1).join(':')}:*`)];
 }

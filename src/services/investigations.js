@@ -257,7 +257,7 @@ export function investigationService({ store, clock, config, audit, llm = null }
     }
   }
 
-  /** Delegation under test: first active grant (createdAt asc) from the business that covers the action. */
+  /** Delegation under test: first active grant (createdAt asc) from the business covering the action, else its first active grant. */
   async function delegationFor(agentId, businessId, action, now) {
     if (!businessId) return null;
     const [match] = await store.grants.findActiveFor(agentId, businessId, now, patternsFor(action));

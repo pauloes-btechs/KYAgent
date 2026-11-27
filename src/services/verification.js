@@ -125,7 +125,11 @@ export function verificationService({ store, clock, config, audit }) {
     // 10. no credential: evaluate active grants from this business
     // The action match runs in the store query so the store's result cap cannot hide a permitting grant.
     const matching = await store.grants.findActiveFor(agent.id, businessId, now, patternsFor(req.action));
-    if (!matching.length) deny((await store.grants.findActiveFor(agent.id, businessId, now)).length ? 'ACTION_NOT_PERMITTED' : 'NO_GRANT');
+    if (!matching.length) {
+      const anyGrant = (await store.grants.findActiveFor(agent.id, businessId, now)).length > 0;
+      deny(anyGrant ? 'ACTION_NOT_PERMITTED' : 'NO_GRANT');
+    }
+    // shortcut: constraints are checked after the 100 cap, so 100+ older matching grants that all fail them hide a newer one; push constraints into the query if grant counts grow.
     const winner = matching.find((g) => withinDelegationMax(g.constraints, req.resource, req.context));
     if (!winner) deny('CONSTRAINT_VIOLATION');
     out.grantId = winner.id;
