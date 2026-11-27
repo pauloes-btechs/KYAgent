@@ -47,7 +47,7 @@ async function main() {
       }
       logger.warn('sanctions watcher: the MongoDB user is not least-privilege (refused in production)', fields);
     }
-    watcher =new SanctionsWatcher({ store, audit: app.services.audit, events: app.events, logger });
+    watcher = new SanctionsWatcher({ store, audit: app.services.audit, events: app.events, logger });
     try {
       await watcher.start();
       logger.info('sanctions watcher started');
