@@ -22,7 +22,7 @@ import { normalizeSignals, signalsText } from '../memory/signalsText.js';
 import { schemas, validate } from '../validate.js';
 import { keyLineage, ownedKeyIds } from './apiKeys.js';
 import { actorOf } from './audit.js';
-import { actionMatches } from './authz.js';
+import { patternsFor } from './authz.js';
 import { receiptService } from './receipts.js';
 
 export const HARNESS_ID_RE = /^[a-z]{2,4}_[A-Za-z0-9_-]{1,64}$/;
@@ -260,8 +260,8 @@ export function investigationService({ store, clock, config, audit, llm = null }
   /** Delegation under test: first active grant (createdAt asc) from the business that covers the action. */
   async function delegationFor(agentId, businessId, action, now) {
     if (!businessId) return null;
-    const grants = await store.grants.findActiveFor(agentId, businessId, now);
-    return grants.find((g) => g.actions.some((p) => actionMatches(p, action))) ?? grants[0] ?? null;
+    const [match] = await store.grants.findActiveFor(agentId, businessId, now, patternsFor(action));
+    return match ?? (await store.grants.findActiveFor(agentId, businessId, now))[0] ?? null;
   }
 
   return {
